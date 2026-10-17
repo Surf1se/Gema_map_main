@@ -23,9 +23,13 @@ test('two browsers share positions, stop sharing, sign out, and work on mobile',
     await page.locator('#auth-dialog').waitFor({ state: 'hidden' });
     return { page, context };
   }
-  const alice = await participant('Алиса', 'alice@example.com', { latitude: 55.75, longitude: 37.62, accuracy: 15 });
+  const alice = await participant('Алиса', 'alice@example.com', { latitude: 55.75, longitude: 37.62, accuracy: 20_000 });
   const bob = await participant('Боб', 'bob@example.com', { latitude: 55.76, longitude: 37.63, accuracy: 20 }, true);
   await alice.page.locator('#share-button').click(); await bob.page.locator('#share-button').click();
+  await alice.page.waitForFunction(() => document.querySelector('#notice').textContent.includes('±20000 м'));
+  await bob.page.waitForFunction(() => document.querySelector('#people-count').textContent === '1');
+  assert.doesNotMatch(await bob.page.locator('#people').textContent(), /Алиса/);
+  await alice.context.setGeolocation({ latitude: 55.75, longitude: 37.62, accuracy: 15 });
   for (const { page } of [alice, bob]) {
     await page.waitForFunction(() => document.querySelector('#people-count').textContent === '2');
     assert.equal(await page.locator('.pin-avatar').count(), 2);

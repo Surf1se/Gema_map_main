@@ -12,6 +12,8 @@ let events = null;
 let watch = null;
 let active = false;
 let lastPosition = null;
+let latestAccuracy = null;
+const MAX_SHARED_ACCURACY = 100;
 let sendTimer = null;
 let pendingLocation = Promise.resolve();
 let locationPending = false;
@@ -136,7 +138,7 @@ function sharingUI() {
   $('profile-status').textContent = active ? 'Геопозиция включена' : 'Передача выключена';
 }
 function sendPosition() {
-  if (!active || !lastPosition || locationPending || Date.now() - lastPosition.observedAt > 60_000) return;
+  if (!active || !lastPosition || latestAccuracy > MAX_SHARED_ACCURACY || locationPending || Date.now() - lastPosition.observedAt > 60_000) return;
   const generation = sendingGeneration;
   locationPending = true;
   pendingLocation = api('/location', lastPosition).then(() => {
@@ -152,7 +154,7 @@ async function stopSharing(send = true) {
   active = false;
   sendingGeneration++;
   if (watch !== null) navigator.geolocation.clearWatch(watch);
-  watch = null; clearInterval(sendTimer); lastPosition = null;
+  watch = null; clearInterval(sendTimer); lastPosition = null; latestAccuracy = null;
   sharingUI();
   await pendingLocation;
   if (send && user) {
@@ -165,22 +167,30 @@ function startSharing() {
   if (!window.isSecureContext) return notice('Геопозиция работает через HTTPS. Откройте защищённый адрес приложения. Для локальной разработки подходит localhost.');
   if (!navigator.geolocation) return notice('Этот браузер не поддерживает геопозицию.');
   active = true;
+  lastPosition = null;
+  latestAccuracy = null;
   sharingUI();
   notice('Разрешите доступ к геопозиции в браузере. Получаем координаты…');
   const generation = ++sendingGeneration;
   watch = navigator.geolocation.watchPosition(position => {
     if (!active || generation !== sendingGeneration) return;
     const { latitude, longitude, accuracy } = position.coords;
-    lastPosition = { latitude, longitude, accuracy, observedAt: position.timestamp };
     if (Date.now() - position.timestamp > 60_000) return notice('Ожидаем свежие координаты от устройства…');
+    latestAccuracy = accuracy;
+    if (accuracy > MAX_SHARED_ACCURACY) {
+      notice(`Сейчас точность ±${Math.round(accuracy)} м. Ждём точности до 100 м: включите точную геолокацию и GPS, выйдите на открытое место. На компьютере без GPS такая точность может быть недоступна.`);
+      return;
+    }
+    lastPosition = { latitude, longitude, accuracy, observedAt: position.timestamp };
     sendPosition();
   }, async error => {
     if (!active || generation !== sendingGeneration) return;
     if (error.code === 1) { await stopSharing(); notice('Доступ к геопозиции запрещён. Разрешите его в настройках сайта и включите передачу снова.'); }
     else notice(error.code === 3 ? 'Устройство пока не определило координаты. Ожидаем следующий сигнал…' : 'Геопозиция недоступна. Проверьте службы геолокации устройства.');
-  }, { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 });
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30_000 });
   sendTimer = setInterval(() => {
     sendPosition();
+    if (latestAccuracy !== null && latestAccuracy > MAX_SHARED_ACCURACY) return;
     if (!lastPosition || Date.now() - lastPosition.observedAt > 60_000) notice('Нет свежих координат. Устаревшая точка автоматически исчезнет с карты.');
   }, 15_000);
 }

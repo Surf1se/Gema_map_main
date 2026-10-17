@@ -75,12 +75,14 @@ test('cross-site writes are rejected and logout revokes the session', async t =>
 });
 
 test('accounts survive restart but location history is not persisted', async t => {
-  const dir = mkdtempSync(join(tmpdir(), 'gema-test-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const dir = mkdtempSync(join(tmpdir(), 'gema-test-'));
+  let second;
+  t.after(async () => { await second?.close(); rmSync(dir, { recursive: true, force: true }); });
   const path = join(dir, 'test.sqlite');
   const first = await start(path); const alice = client(first.url);
   await alice('/register', account()); await alice('/location', { latitude: 10, longitude: 20, accuracy: 5, observedAt: Date.now() });
   await first.close();
-  const second = await start(path); t.after(() => second.close()); const request = client(second.url);
+  second = await start(path); const request = client(second.url);
   assert.equal((await request('/login', account())).status, 200);
   const response = await request('/events'); const reader = response.body.getReader();
   assert.match(new TextDecoder().decode((await reader.read()).value), /"positions":\[\]/);
