@@ -2,7 +2,7 @@ import { createInterface } from 'node:readline/promises';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import qrcode from 'qrcode-terminal';
-import { TelegramClient } from 'teleproto';
+import { TelegramClient, WebSocketTransport } from 'teleproto';
 import { StringSession } from 'teleproto/sessions';
 
 const root = join(import.meta.dirname, '..');
@@ -19,7 +19,7 @@ if (!Number.isInteger(apiId) || apiId <= 0 || !apiHash) {
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 const controller = new AbortController();
 process.once('SIGINT', () => controller.abort());
-const client = new TelegramClient(new StringSession(existsSync(sessionPath) ? readFileSync(sessionPath, 'utf8').trim() : ''), apiId, apiHash, { connectionRetries: 5 });
+const client = new TelegramClient(new StringSession(existsSync(sessionPath) ? readFileSync(sessionPath, 'utf8').trim() : ''), apiId, apiHash, { connectionRetries: 5, transport: new WebSocketTransport() });
 
 try {
   await client.connect();
