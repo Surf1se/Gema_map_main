@@ -9,12 +9,14 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test test/api.test.js",
+    "telegram:login": "node scripts/telegram-login.js",
+    "test": "node --test test/api.test.js test/alerts.test.js",
     "test:browser": "node --test test/browser.test.js"
   },
   "dependencies": {
     "express": "5.1.0",
-    "leaflet": "1.9.4"
+    "leaflet": "1.9.4",
+    "teleproto": "^1.230.1"
   },
   "devDependencies": {
     "playwright": "1.56.1"

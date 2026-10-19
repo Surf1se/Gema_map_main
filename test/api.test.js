@@ -10,7 +10,7 @@ async function start(database = ':memory:') {
   const instance = createApp({ database, secureCookies: false });
   const server = instance.app.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  return { url: `http://127.0.0.1:${server.address().port}`, async close() { instance.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
+  return { url: `http://127.0.0.1:${server.address().port}`, applyPost: instance.applyPost, async close() { instance.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
 }
 function client(url) {
   let cookie = '';
@@ -30,7 +30,7 @@ async function nextCount(reader, expected) {
     const text = decoder.decode(value);
     for (const match of text.matchAll(/data: (\{[^\n]+\})/g)) {
       const data = JSON.parse(match[1]);
-      assert.deepEqual(Object.keys(data), ['online']);
+      assert.deepEqual(Object.keys(data), ['online', 'alerts', 'feedStatus']);
       if (data.online === expected) return text;
     }
   }
@@ -68,6 +68,24 @@ test('online count tracks unique connected accounts without identity data', asyn
   await nextCount(aliceReader, 1);
   assert.equal((await alice('/location', { latitude: 55, longitude: 37 })).status, 404);
   assert.equal((await alice('/location/stop', {})).status, 404);
+});
+
+test('danger, edits and clear messages update the map feed', async t => {
+  const env = await start(); t.after(() => env.close()); const request = client(env.url);
+  await request('/register', account());
+  const reader = (await request('/events')).body.getReader(); t.after(() => reader.cancel().catch(() => {}));
+  assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
+  const date = Date.now();
+  env.applyPost({ id: 101, date, text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
+  assert.match(await nextCount(reader, 1), /"place":"Раменское"/);
+  env.applyPost({ id: 101, date, text: 'МО Раменское\nСбитие БПЛА' });
+  assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
+  env.applyPost({ id: 102, date, text: 'ГО Бронницы\nМосковская область\nРакетная опасность' });
+  assert.match(await nextCount(reader, 1), /"place":"Бронницы"/);
+  env.applyPost({ id: 103, date: date + 1, text: 'Московская область\nОтбой опасности по БПЛА' });
+  assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
+  env.applyPost({ id: 102, date, text: 'ГО Бронницы\nМосковская область\nРакетная опасность' });
+  assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
 });
 
 test('cross-site writes are rejected and logout revokes the session', async t => {

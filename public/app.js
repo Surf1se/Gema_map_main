@@ -1,6 +1,6 @@
 /* global L */
 const $ = id => document.getElementById(id);
-const map = L.map('map', { zoomControl: false }).setView([30, 20], 3);
+const map = L.map('map', { zoomControl: false }).setView([55.75, 37.62], 8);
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -10,8 +10,35 @@ tiles.on('tileerror', () => notice('Не удалось загрузить ча�
 let user = null;
 let mode = 'register';
 let events = null;
+let alertFit = false;
+const alertCircles = new Map();
 const initials = name => [...name.trim()].slice(0, 2).join('').toUpperCase();
 function notice(message = '') { $('notice').textContent = message; $('notice').hidden = !message; }
+
+function renderAlerts(alerts) {
+  const latest = new Map();
+  for (const alert of alerts) if (!latest.has(alert.placeId)) latest.set(alert.placeId, alert);
+  for (const [id, circle] of alertCircles) if (!latest.has(id)) { circle.remove(); alertCircles.delete(id); }
+  for (const [id, alert] of latest) {
+    let circle = alertCircles.get(id);
+    if (!circle) {
+      circle = L.circle([alert.latitude, alert.longitude], { radius: alert.radius, color: '#ba2525', fillColor: '#e44444', fillOpacity: 0.35, weight: 2 }).addTo(map);
+      alertCircles.set(id, circle);
+    }
+    circle.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
+    const popup = document.createElement('div');
+    const title = document.createElement('strong'); title.textContent = `Опасность: ${alert.place}`;
+    const note = document.createElement('p'); note.textContent = 'Условный круг по сообщению канала. Это не точная зона опасности.';
+    const source = document.createElement('a'); source.href = `https://t.me/radar_moscoww/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
+    popup.append(title, note, source); circle.bindPopup(popup);
+  }
+  $('alerts-count').textContent = `Областей опасности: ${latest.size}`;
+  if (!latest.size) alertFit = false;
+  else if (!alertFit) {
+    map.fitBounds(L.featureGroup([...alertCircles.values()]).getBounds(), { maxZoom: 9, padding: [40, 40] });
+    alertFit = true;
+  }
+}
 
 async function api(path, data) {
   let response;
@@ -68,7 +95,12 @@ function connect() {
   $('connection').textContent = 'Подключение…';
   events = new EventSource('/api/events');
   events.onopen = () => { $('connection').textContent = 'В реальном времени'; notice(''); };
-  events.onmessage = event => { $('online-count').textContent = JSON.parse(event.data).online; };
+  events.onmessage = event => {
+    const data = JSON.parse(event.data);
+    $('online-count').textContent = data.online;
+    renderAlerts(data.alerts || []);
+    $('feed-status').textContent = ({ off: 'Канал не подключён', connecting: 'Соединяемся с каналом…', connected: 'Канал подключён', error: 'Ошибка канала' })[data.feedStatus] || 'Канал не подключён';
+  };
   events.onerror = async () => {
     $('connection').textContent = 'Переподключение…';
     try { await api('/me'); }
@@ -80,6 +112,8 @@ function connect() {
 function signedOut() {
   events?.close(); events = null; user = null;
   $('online-count').textContent = '0';
+  renderAlerts([]);
+  $('feed-status').textContent = 'Войдите в аккаунт';
   $('profile-name').textContent = 'Гость';
   $('profile-avatar').textContent = '?';
   $('profile-status').textContent = 'Войдите, чтобы присоединиться';

@@ -35,6 +35,12 @@ test('map stays visible while online count follows users on desktop and mobile',
     assert.equal(await page.locator('.map-pin').count(), 0);
     assert.doesNotMatch(await page.locator('.online-card').textContent(), /Алиса|Боб|@/);
   }
+  instance.applyPost({ id: 123, date: Date.now(), text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
+  await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('1'));
+  assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 1);
+  instance.applyPost({ id: 124, date: Date.now(), text: 'Московская область\nОтбой опасности по БПЛА' });
+  await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('0'));
+  assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 0);
   assert.equal(await bob.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   const secondTab = await alice.context.newPage(); await secondTab.goto(url);
   await secondTab.waitForFunction(() => document.querySelector('#online-count').textContent === '2');

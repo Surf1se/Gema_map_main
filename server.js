@@ -5,21 +5,29 @@ import { promisify } from 'node:util';
 import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadPlaceIndex, nextMoscowReset, parsePost } from './lib/alerts.js';
 
 const scrypt = promisify(scryptCallback);
 const root = dirname(fileURLToPath(import.meta.url));
 const digest = value => createHash('sha256').update(value).digest('hex');
 const lifetime = 7 * 24 * 60 * 60 * 1000;
+let cachedPlaces;
 
 export function createApp({ database = join(root, '.data', 'gema.sqlite'), secureCookies = process.env.NODE_ENV === 'production' } = {}) {
   if (database !== ':memory:') mkdirSync(dirname(database), { recursive: true });
   const db = new DatabaseSync(database);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
     CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, created_at INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS alerts (message_id TEXT PRIMARY KEY, place_id INTEGER NOT NULL, place_name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius INTEGER NOT NULL, observed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS alert_clearances (place_id TEXT PRIMARY KEY, cleared_at INTEGER NOT NULL);`);
+  db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
+  const places = cachedPlaces ||= loadPlaceIndex();
   const app = express();
   const clients = new Map();
   const attempts = new Map();
+  let closed = false;
+  let feedStatus = 'off';
   app.disable('x-powered-by');
   app.use((req, res, next) => {
     res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'geolocation=()',
@@ -83,9 +91,37 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   });
   app.get('/api/me', auth, (req, res) => res.json({ user: { id: req.user.id, name: req.user.name } }));
   const onlineCount = () => new Set([...clients.values()].map(client => client.userId)).size;
+  const alerts = () => db.prepare('SELECT message_id AS messageId, place_id AS placeId, place_name AS place, latitude, longitude, radius, observed_at AS observedAt FROM alerts WHERE expires_at>? ORDER BY observed_at DESC').all(Date.now());
   function broadcast() {
-    const data = `data: ${JSON.stringify({ online: onlineCount() })}\n\n`;
+    if (closed) return;
+    const data = `data: ${JSON.stringify({ online: onlineCount(), alerts: alerts(), feedStatus })}\n\n`;
     for (const [res] of clients) res.write(data);
+  }
+  function setFeedStatus(status) {
+    if (!['off', 'connecting', 'connected', 'error'].includes(status)) return;
+    if (status === feedStatus) return;
+    feedStatus = status;
+    broadcast();
+  }
+  function applyPost({ id, text, date }) {
+    const messageId = String(id);
+    const observedAt = Number(date);
+    if (!/^\d+$/.test(messageId) || !Number.isFinite(observedAt) || observedAt > Date.now() + 60_000) return;
+    const parsed = parsePost(text, places);
+    db.prepare('DELETE FROM alerts WHERE message_id=?').run(messageId);
+    if (parsed.kind === 'clear') {
+      const placeId = parsed.place ? String(parsed.place.id) : '*';
+      db.prepare('INSERT INTO alert_clearances (place_id,cleared_at) VALUES (?,?) ON CONFLICT(place_id) DO UPDATE SET cleared_at=max(cleared_at,excluded.cleared_at)').run(placeId, observedAt);
+      if (parsed.place) db.prepare('DELETE FROM alerts WHERE place_id=? AND observed_at<=?').run(parsed.place.id, observedAt);
+      else db.prepare('DELETE FROM alerts WHERE observed_at<=?').run(observedAt);
+    } else if (parsed.kind === 'danger' && nextMoscowReset(observedAt) > Date.now()) {
+      const cleared = db.prepare("SELECT max(cleared_at) AS time FROM alert_clearances WHERE place_id IN ('*',?)").get(String(parsed.place.id)).time;
+      if (cleared === null || observedAt > cleared) {
+        const place = parsed.place;
+        db.prepare('INSERT INTO alerts VALUES (?,?,?,?,?,?,?,?)').run(messageId, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt));
+      }
+    }
+    broadcast();
   }
   app.get('/api/events', auth, (req, res) => {
     res.set({ 'Content-Type': 'text/event-stream', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
@@ -118,11 +154,22 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     if (changed) broadcast();
   }, 10_000);
   timer.unref();
-  return { app, close() { clearInterval(timer); for (const [res] of clients) res.end(); db.close(); } };
+  let resetTimer;
+  function scheduleReset() {
+    resetTimer = setTimeout(() => {
+      db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
+      broadcast();
+      scheduleReset();
+    }, nextMoscowReset(Date.now()) - Date.now());
+    resetTimer.unref();
+  }
+  scheduleReset();
+  return { app, applyPost, setFeedStatus, close() { closed = true; clearInterval(timer); clearTimeout(resetTimer); for (const [res] of clients) res.end(); db.close(); } };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  const { app } = createApp();
+  const { app, applyPost, setFeedStatus } = createApp();
   const port = Number(process.env.PORT || 3000);
   app.listen(port, process.env.HOST || '0.0.0.0', () => console.log(`Gema Map listening on port ${port}`));
+  import('./lib/telegram-watcher.js').then(({ startTelegramWatcher }) => startTelegramWatcher(applyPost, setFeedStatus)).catch(error => { setFeedStatus('error'); console.error(`Telegram: ${error.message}`); });
 }
