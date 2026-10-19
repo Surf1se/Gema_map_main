@@ -28,6 +28,11 @@ test('map stays visible while online count follows users on desktop and mobile',
   const alice = await participant('Алиса', 'alice@example.com');
   await alice.page.waitForFunction(() => document.querySelector('#online-count').textContent === '1');
   assert.equal(await alice.page.locator('#map .leaflet-pane').count() > 0, true);
+  assert.equal(await alice.page.locator('.map-bottom, .leaflet-attribution-flag').count(), 0);
+  const attribution = await alice.page.locator('.leaflet-control-attribution').textContent();
+  assert.match(attribution, /OpenStreetMap/);
+  assert.match(attribution, /GeoNames/);
+  assert.doesNotMatch(attribution, /Leaflet/);
   const bob = await participant('Боб', 'bob@example.com', true);
   for (const { page } of [alice, bob]) {
     await page.waitForFunction(() => document.querySelector('#online-count').textContent === '2');

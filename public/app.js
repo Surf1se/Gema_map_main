@@ -1,6 +1,8 @@
 /* global L */
 const $ = id => document.getElementById(id);
 const map = L.map('map', { zoomControl: false }).setView([55.75, 37.62], 8);
+map.attributionControl.setPrefix(false);
+map.attributionControl.addAttribution('<a href="https://www.geonames.org/">GeoNames</a>');
 L.control.zoom({ position: 'bottomright' }).addTo(map);
 const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

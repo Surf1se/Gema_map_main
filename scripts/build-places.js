@@ -7,7 +7,7 @@ const rows = [];
 for (const line of readFileSync(input, 'utf8').split('\n')) {
   if (!line) continue;
   const fields = line.split('\t');
-  if (fields[6] !== 'P') continue;
+  if (fields[6] !== 'P' || fields[8] !== 'RU') continue;
   const names = [...new Set(fields[3].split(',').filter(name => /^[А-ЯЁа-яё][А-ЯЁа-яё -]*$/.test(name)))];
   if (!names.length) continue;
   rows.push([Number(fields[0]), Number(fields[4]), Number(fields[5]), Number(fields[14]) || 0, fields[10], names]);
