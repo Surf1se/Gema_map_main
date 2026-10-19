@@ -20,12 +20,26 @@ function client(url) {
     return response;
   };
 }
-const account = (email = 'alice@example.com') => ({ email, password: 'correct horse battery', name: 'Алиса', sharingConsent: true });
+const account = (email = 'alice@example.com') => ({ email, password: 'correct horse battery', name: 'Алиса' });
 
-test('registration requires consent, hashes credentials and authenticates via cookie', async t => {
+async function nextCount(reader, expected) {
+  const decoder = new TextDecoder();
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) throw new Error(`События закрылись до значения ${expected}`);
+    const text = decoder.decode(value);
+    for (const match of text.matchAll(/data: (\{[^\n]+\})/g)) {
+      const data = JSON.parse(match[1]);
+      assert.deepEqual(Object.keys(data), ['online']);
+      if (data.online === expected) return text;
+    }
+  }
+}
+
+test('registration needs no location consent and sessions remain protected', async t => {
   const env = await start(); t.after(() => env.close()); const request = client(env.url);
   assert.equal((await request('/me')).status, 401);
-  assert.equal((await request('/register', { ...account(), sharingConsent: false })).status, 400);
+  assert.equal((await request('/register', { ...account(), name: '' })).status, 400);
   const response = await request('/register', account());
   assert.equal(response.status, 201);
   assert.match(response.headers.get('set-cookie'), /HttpOnly/);
@@ -37,55 +51,48 @@ test('registration requires consent, hashes credentials and authenticates via co
   assert.equal((await request('/login', account())).status, 200);
 });
 
-test('a second user receives live coordinates and removal over SSE; guests cannot read or send', async t => {
+test('online count tracks unique connected accounts without identity data', async t => {
   const env = await start(); t.after(() => env.close());
   const alice = client(env.url), bob = client(env.url), guest = client(env.url);
   await alice('/register', account());
   await bob('/register', { ...account('bob@example.com'), name: 'Боб' });
   assert.equal((await guest('/events')).status, 401);
-  assert.equal((await guest('/location', {})).status, 401);
-  const response = await bob('/events');
-  assert.equal(response.status, 200);
-  const reader = response.body.getReader(); t.after(() => reader.cancel().catch(() => {}));
-  const initial = new TextDecoder().decode((await reader.read()).value);
-  assert.match(initial, /"positions":\[\]/);
-  const location = { latitude: 55.75, longitude: 37.62, accuracy: 12, observedAt: Date.now() };
-  assert.equal((await alice('/location', location)).status, 204);
-  const update = new TextDecoder().decode((await reader.read()).value);
-  assert.match(update, /55.75/); assert.match(update, /Алиса/); assert.doesNotMatch(update, /email|password|token/);
-  assert.equal((await alice('/location/stop', {})).status, 204);
-  assert.match(new TextDecoder().decode((await reader.read()).value), /"positions":\[\]/);
-});
-
-test('invalid, stale and future coordinates are rejected', async t => {
-  const env = await start(); t.after(() => env.close()); const request = client(env.url); await request('/register', account());
-  const valid = { latitude: 0, longitude: 0, accuracy: 10, observedAt: Date.now() };
-  for (const change of [{ latitude: 91 }, { longitude: -181 }, { accuracy: -1 }, { latitude: '55' }, { observedAt: Date.now() - 70_000 }, { observedAt: Date.now() + 60_000 }]) {
-    assert.equal((await request('/location', { ...valid, ...change })).status, 400);
-  }
-  assert.equal((await request('/location', valid)).status, 204);
+  const aliceReader = (await alice('/events')).body.getReader(); t.after(() => aliceReader.cancel().catch(() => {}));
+  assert.doesNotMatch(await nextCount(aliceReader, 1), /Алиса|Боб|email|password|token/);
+  const secondTabReader = (await alice('/events')).body.getReader(); t.after(() => secondTabReader.cancel().catch(() => {}));
+  await nextCount(secondTabReader, 1);
+  const bobReader = (await bob('/events')).body.getReader(); t.after(() => bobReader.cancel().catch(() => {}));
+  assert.doesNotMatch(await nextCount(aliceReader, 2), /Алиса|Боб|email|password|token/);
+  await nextCount(bobReader, 2);
+  await bobReader.cancel();
+  await nextCount(aliceReader, 1);
+  assert.equal((await alice('/location', { latitude: 55, longitude: 37 })).status, 404);
+  assert.equal((await alice('/location/stop', {})).status, 404);
 });
 
 test('cross-site writes are rejected and logout revokes the session', async t => {
   const env = await start(); t.after(() => env.close()); const request = client(env.url); await request('/register', account());
-  assert.equal((await request('/location/stop', {}, { Origin: 'https://another.example' })).status, 403);
-  assert.equal((await request('/location/stop', {}, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
+  assert.equal((await request('/logout', {}, { Origin: 'https://another.example' })).status, 403);
+  assert.equal((await request('/logout', {}, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
   assert.equal((await request('/logout', {})).status, 204);
   assert.equal((await request('/me')).status, 401);
 });
 
-test('accounts survive restart but location history is not persisted', async t => {
+test('accounts survive restart while online count starts from active connections', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'gema-test-'));
   let second;
   t.after(async () => { await second?.close(); rmSync(dir, { recursive: true, force: true }); });
   const path = join(dir, 'test.sqlite');
   const first = await start(path); const alice = client(first.url);
-  await alice('/register', account()); await alice('/location', { latitude: 10, longitude: 20, accuracy: 5, observedAt: Date.now() });
+  await alice('/register', account());
+  const firstReader = (await alice('/events')).body.getReader();
+  await nextCount(firstReader, 1);
+  await firstReader.cancel();
   await first.close();
   second = await start(path); const request = client(second.url);
   assert.equal((await request('/login', account())).status, 200);
   const response = await request('/events'); const reader = response.body.getReader();
-  assert.match(new TextDecoder().decode((await reader.read()).value), /"positions":\[\]/);
+  await nextCount(reader, 1);
   await reader.cancel();
 });
 

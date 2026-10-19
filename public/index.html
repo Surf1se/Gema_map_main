@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#122224"><title>Gema — рядом на карте</title>
+  <meta name="theme-color" content="#122224"><title>Gema — карта и онлайн</title>
   <link rel="stylesheet" href="/vendor/leaflet/leaflet.css"><link rel="stylesheet" href="/styles.css">
   <script defer src="/vendor/leaflet/leaflet.js"></script><script type="module" src="/app.js"></script>
 </head>
@@ -10,33 +10,29 @@
   <aside class="sidebar">
     <a class="brand" href="/" aria-label="Gema Map"><span class="brand-icon">g</span>gema<span class="brand-dot">•</span></a>
     <div class="workspace-label">ОБЩЕЕ ПРОСТРАНСТВО</div>
-    <div class="nav-selected"><span>◈</span> Карта участников <span class="live-dot"></span></div>
-    <div class="sidebar-intro"><span class="eyebrow">ЛЮДИ, А НЕ РАССТОЯНИЯ</span><h1>Быть ближе.<br>В реальном времени.</h1><p>Одно пространство, чтобы видеть, где вы и ваши друзья.</p></div>
-    <div class="people-title"><h2>Сейчас на карте</h2><span id="people-count">0</span></div>
-    <ul id="people" class="people"><li class="empty">Здесь появятся участники,<br>которые делятся геопозицией.</li></ul>
-    <div class="sharing-card"><span class="sharing-symbol">⌖</span><div><strong id="sharing-title">Вы управляете видимостью</strong><p id="sharing-description">Включите геопозицию, чтобы появиться на общей карте.</p></div></div>
-    <button id="share-button" class="primary" disabled>Включить геопозицию <span>↗</span></button>
+    <div class="nav-selected"><span>◈</span> Общая карта <span class="live-dot"></span></div>
+    <div class="sidebar-intro"><span class="eyebrow">GEMA MAP</span><h1>Пространство<br>для нового.</h1><p>Карта остаётся с нами. Скоро здесь появятся новые возможности.</p></div>
+    <div class="online-card"><span class="eyebrow">СЕЙЧАС НА ПЛАТФОРМЕ</span><div id="online-count" class="online-count" aria-live="polite">0</div><p>пользователей онлайн</p></div>
     <div class="profile"><span class="avatar" id="profile-avatar">?</span><div><strong id="profile-name">Гость</strong><small id="profile-status">Войдите, чтобы присоединиться</small></div><button id="logout" class="icon-button" title="Выйти" aria-label="Выйти" hidden>↪</button></div>
   </aside>
   <main class="map-shell">
-    <div id="map" aria-label="Общая карта геопозиций"></div>
-    <header class="map-header"><div class="map-heading"><span class="live-dot"></span><strong>Ваша общая карта</strong><span class="divider"></span><span id="connection">Подключение…</span></div><button id="locate" class="map-button" title="Показать мою точку">⌖ <span>Моя позиция</span></button></header>
+    <div id="map" aria-label="Карта"></div>
+    <header class="map-header"><div class="map-heading"><span class="live-dot"></span><strong>Общая карта</strong><span class="divider"></span><span id="connection">Подключение…</span></div></header>
     <div id="notice" role="status" class="notice" hidden></div>
-    <div class="map-bottom"><span class="bottom-dot"></span><span>Живые геопозиции · без истории перемещений</span></div>
+    <div class="map-bottom"><span class="bottom-dot"></span><span>Карта доступна без доступа к местоположению</span></div>
   </main>
   <dialog id="auth-dialog" aria-labelledby="auth-title">
-    <div class="dialog-brand"><span class="brand-icon">g</span> GEMA MAP</div><span class="eyebrow">ВАШЕ МЕСТО НА КАРТЕ</span>
-    <h2 id="auth-title">Ближе, даже на расстоянии.</h2><p class="auth-description">Присоединяйтесь к общей карте. Ваша точка и точки друзей — в одном месте.</p>
+    <div class="dialog-brand"><span class="brand-icon">g</span> GEMA MAP</div><span class="eyebrow">ВАШ АККАУНТ GEMA</span>
+    <h2 id="auth-title">Добро пожаловать в Gema.</h2><p class="auth-description">Войдите, чтобы видеть, сколько пользователей сейчас на платформе.</p>
     <div class="auth-tabs"><button id="register-tab" class="active" type="button">Регистрация</button><button id="login-tab" type="button">Вход</button></div>
     <form id="auth-form">
       <label id="name-label">Ваше имя<input id="name" name="name" autocomplete="nickname" minlength="2" maxlength="40" placeholder="Как к вам обращаться" required></label>
       <label>Email<input id="email" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required></label>
       <label>Пароль<input id="password" name="password" type="password" autocomplete="new-password" minlength="10" maxlength="128" placeholder="Не менее 10 символов" required></label>
-      <label class="consent" id="consent-label"><input id="consent" type="checkbox" required><span>Я понимаю: при включённой передаче моё имя и точная геопозиция видны <strong>всем вошедшим участникам</strong>. Передачу можно остановить в любой момент.</span></label>
       <p id="auth-error" class="form-error" role="alert"></p><button id="auth-submit" class="primary" type="submit">Создать аккаунт <span>↗</span></button>
     </form>
-    <p class="auth-footnote">Доступ к координатам запрашивается отдельно в браузере. Карта работает и без передачи своей позиции.</p>
+    <p class="auth-footnote">Счётчик показывает только количество пользователей онлайн.</p>
   </dialog>
-  <noscript>Для работы карты включите JavaScript в браузере.</noscript>
+  <noscript>Для работы платформы включите JavaScript в браузере.</noscript>
 </body>
 </html>

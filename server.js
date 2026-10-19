@@ -10,7 +10,6 @@ const scrypt = promisify(scryptCallback);
 const root = dirname(fileURLToPath(import.meta.url));
 const digest = value => createHash('sha256').update(value).digest('hex');
 const lifetime = 7 * 24 * 60 * 60 * 1000;
-const freshness = 90_000;
 
 export function createApp({ database = join(root, '.data', 'gema.sqlite'), secureCookies = process.env.NODE_ENV === 'production' } = {}) {
   if (database !== ':memory:') mkdirSync(dirname(database), { recursive: true });
@@ -20,11 +19,10 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);`);
   const app = express();
   const clients = new Map();
-  const positions = new Map();
   const attempts = new Map();
   app.disable('x-powered-by');
   app.use((req, res, next) => {
-    res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'geolocation=(self)',
+    res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'geolocation=()',
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" });
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -60,8 +58,8 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   const credentials = body => typeof body.email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim()) && body.email.length <= 254 && typeof body.password === 'string' && body.password.length >= 10 && body.password.length <= 128;
   app.post('/api/register', rateLimit, async (req, res) => {
     const body = req.body || {};
-    if (!credentials(body) || typeof body.name !== 'string' || body.name.trim().length < 2 || body.name.trim().length > 40 || body.sharingConsent !== true)
-      return res.status(400).json({ error: 'Укажите имя (2–40 символов), email, пароль (10–128 символов) и согласие с условиями передачи геопозиции.' });
+    if (!credentials(body) || typeof body.name !== 'string' || body.name.trim().length < 2 || body.name.trim().length > 40)
+      return res.status(400).json({ error: 'Укажите имя (2–40 символов), email и пароль (10–128 символов).' });
     const email = body.email.trim().toLowerCase();
     const salt = randomBytes(16).toString('hex');
     const hash = (await scrypt(body.password, salt, 64)).toString('hex');
@@ -84,31 +82,21 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     res.json({ user: issueSession(res, user) });
   });
   app.get('/api/me', auth, (req, res) => res.json({ user: { id: req.user.id, name: req.user.name } }));
-  const snapshot = () => [...positions.values()].filter(p => Date.now() - p.observedAt < freshness);
+  const onlineCount = () => new Set([...clients.values()].map(client => client.userId)).size;
   function broadcast() {
-    const data = `data: ${JSON.stringify({ positions: snapshot() })}\n\n`;
+    const data = `data: ${JSON.stringify({ online: onlineCount() })}\n\n`;
     for (const [res] of clients) res.write(data);
   }
   app.get('/api/events', auth, (req, res) => {
     res.set({ 'Content-Type': 'text/event-stream', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.flushHeaders();
-    clients.set(res, req.user.token);
-    res.write(`data: ${JSON.stringify({ positions: snapshot() })}\n\n`);
-    req.on('close', () => clients.delete(res));
-  });
-  app.post('/api/location', auth, (req, res) => {
-    const { latitude, longitude, accuracy, observedAt } = req.body || {};
-    if (![latitude, longitude, accuracy, observedAt].every(Number.isFinite) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180 || accuracy < 0 || accuracy > 100_000 || observedAt > Date.now() + 10_000 || Date.now() - observedAt > 60_000)
-      return res.status(400).json({ error: 'Нужны свежие корректные координаты.' });
-    positions.set(req.user.id, { id: req.user.id, name: req.user.name, latitude, longitude, accuracy, observedAt });
+    clients.set(res, { token: req.user.token, userId: req.user.id });
     broadcast();
-    res.sendStatus(204);
+    req.on('close', () => { if (clients.delete(res)) broadcast(); });
   });
-  app.post('/api/location/stop', auth, (req, res) => { positions.delete(req.user.id); broadcast(); res.sendStatus(204); });
   app.post('/api/logout', auth, (req, res) => {
-    positions.delete(req.user.id);
     db.prepare('DELETE FROM sessions WHERE token=?').run(req.user.token);
-    for (const [client, token] of clients) if (token === req.user.token) { client.end(); clients.delete(client); }
+    for (const [client, session] of clients) if (session.token === req.user.token) { client.end(); clients.delete(client); }
     broadcast();
     res.clearCookie('gema_session', { path: '/', httpOnly: true, sameSite: 'strict', secure: secureCookies });
     res.sendStatus(204);
@@ -122,10 +110,9 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   });
   const timer = setInterval(() => {
     let changed = false;
-    for (const [id, position] of positions) if (Date.now() - position.observedAt >= freshness) { positions.delete(id); changed = true; }
     for (const [key, entry] of attempts) if (entry.until < Date.now()) attempts.delete(key);
-    for (const [res, token] of clients) {
-      if (!db.prepare('SELECT 1 FROM sessions WHERE token=? AND expires_at>?').get(token, Date.now())) { res.end(); clients.delete(res); }
+    for (const [res, session] of clients) {
+      if (!db.prepare('SELECT 1 FROM sessions WHERE token=? AND expires_at>?').get(session.token, Date.now())) { res.end(); clients.delete(res); changed = true; }
       else res.write(': heartbeat\n\n');
     }
     if (changed) broadcast();
