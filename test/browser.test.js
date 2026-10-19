@@ -52,6 +52,12 @@ test('map stays visible while online count follows users on desktop and mobile',
   assert.equal(await alice.page.locator('#active-circles-count').textContent(), '0');
   await bob.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '0');
   assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 0);
+  instance.applyPost({ source: 'radarrussiia', id: 125, date: Date.now(), text: 'Геленджик\nКраснодарский край\nОпасность по БПЛА' });
+  await alice.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '1');
+  await alice.page.locator('#map path.leaflet-interactive').dispatchEvent('click');
+  assert.equal(await alice.page.locator('.leaflet-popup-content a').getAttribute('href'), 'https://t.me/radarrussiia/125');
+  instance.applyPost({ source: 'radarrussiia', id: 126, date: Date.now() + 1, text: 'Краснодарский край\nОтбой опасности по БПЛА' });
+  await alice.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '0');
   const [onlineCard, alertCard] = await Promise.all([bob.page.locator('.stat-card').first().boundingBox(), bob.page.locator('.stat-card').last().boundingBox()]);
   assert.equal(alertCard.x > onlineCard.x, true);
   assert.equal(await bob.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);

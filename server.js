@@ -19,10 +19,18 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
     CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS alerts (message_id TEXT PRIMARY KEY, place_id INTEGER NOT NULL, place_name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius INTEGER NOT NULL, observed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS alerts (message_id TEXT PRIMARY KEY, place_id INTEGER NOT NULL, place_name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius INTEGER NOT NULL, observed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, region_code TEXT);
     CREATE TABLE IF NOT EXISTS alert_clearances (place_id TEXT PRIMARY KEY, cleared_at INTEGER NOT NULL);`);
   db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
   const places = cachedPlaces ||= loadPlaceIndex();
+  if (!db.prepare('PRAGMA table_info(alerts)').all().some(column => column.name === 'region_code')) db.exec('ALTER TABLE alerts ADD COLUMN region_code TEXT');
+  db.exec("UPDATE alerts SET message_id='radar_moscoww:'||message_id||':'||place_id WHERE instr(message_id,':')=0");
+  db.exec("UPDATE alert_clearances SET place_id='radar_moscoww:'||place_id WHERE instr(place_id,':')=0");
+  const oldAlerts = db.prepare('SELECT message_id,place_id FROM alerts WHERE region_code IS NULL').all();
+  if (oldAlerts.length) {
+    const regionById = new Map([...places.values()].flat().map(place => [place.id, place.region]));
+    for (const alert of oldAlerts) db.prepare('UPDATE alerts SET region_code=? WHERE message_id=?').run(regionById.get(alert.place_id) || null, alert.message_id);
+  }
   const app = express();
   const clients = new Map();
   const attempts = new Map();
@@ -91,7 +99,8 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   });
   app.get('/api/me', auth, (req, res) => res.json({ user: { id: req.user.id, name: req.user.name } }));
   const onlineCount = () => new Set([...clients.values()].map(client => client.userId)).size;
-  const alerts = () => db.prepare('SELECT message_id AS messageId, place_id AS placeId, place_name AS place, latitude, longitude, radius, observed_at AS observedAt FROM alerts WHERE expires_at>? ORDER BY observed_at DESC').all(Date.now());
+  const alerts = () => db.prepare('SELECT message_id AS messageKey, place_id AS placeId, place_name AS place, latitude, longitude, radius, observed_at AS observedAt FROM alerts WHERE expires_at>? ORDER BY observed_at DESC').all(Date.now())
+    .map(({ messageKey, ...alert }) => ({ ...alert, source: messageKey.split(':')[0], messageId: messageKey.split(':')[1] }));
   function broadcast() {
     if (closed) return;
     const data = `data: ${JSON.stringify({ online: onlineCount(), alerts: alerts(), feedStatus })}\n\n`;
@@ -103,22 +112,22 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     feedStatus = status;
     broadcast();
   }
-  function applyPost({ id, text, date }) {
+  function applyPost({ source = 'radar_moscoww', id, text, date }) {
     const messageId = String(id);
     const observedAt = Number(date);
-    if (!/^\d+$/.test(messageId) || !Number.isFinite(observedAt) || observedAt > Date.now() + 60_000) return;
+    if (!['radar_moscoww', 'radarrussiia'].includes(source) || !/^\d+$/.test(messageId) || !Number.isFinite(observedAt) || observedAt > Date.now() + 60_000) return;
     const parsed = parsePost(text, places);
-    db.prepare('DELETE FROM alerts WHERE message_id=?').run(messageId);
+    db.prepare('DELETE FROM alerts WHERE message_id GLOB ?').run(`${source}:${messageId}:*`);
     if (parsed.kind === 'clear') {
-      const placeId = parsed.place ? String(parsed.place.id) : '*';
-      db.prepare('INSERT INTO alert_clearances (place_id,cleared_at) VALUES (?,?) ON CONFLICT(place_id) DO UPDATE SET cleared_at=max(cleared_at,excluded.cleared_at)').run(placeId, observedAt);
-      if (parsed.place) db.prepare('DELETE FROM alerts WHERE place_id=? AND observed_at<=?').run(parsed.place.id, observedAt);
-      else db.prepare('DELETE FROM alerts WHERE observed_at<=?').run(observedAt);
+      const scopes = parsed.places.length ? parsed.places.map(place => String(place.id)) : parsed.regions.length ? parsed.regions.map(code => `region:${code}`) : ['*'];
+      for (const scope of scopes) db.prepare('INSERT INTO alert_clearances (place_id,cleared_at) VALUES (?,?) ON CONFLICT(place_id) DO UPDATE SET cleared_at=max(cleared_at,excluded.cleared_at)').run(`${source}:${scope}`, observedAt);
+      if (parsed.places.length) for (const place of parsed.places) db.prepare('DELETE FROM alerts WHERE message_id GLOB ? AND place_id=? AND observed_at<=?').run(`${source}:*`, place.id, observedAt);
+      else if (parsed.regions.length) for (const code of parsed.regions) db.prepare('DELETE FROM alerts WHERE message_id GLOB ? AND region_code=? AND observed_at<=?').run(`${source}:*`, code, observedAt);
+      else db.prepare('DELETE FROM alerts WHERE message_id GLOB ? AND observed_at<=?').run(`${source}:*`, observedAt);
     } else if (parsed.kind === 'danger' && nextMoscowReset(observedAt) > Date.now()) {
-      const cleared = db.prepare("SELECT max(cleared_at) AS time FROM alert_clearances WHERE place_id IN ('*',?)").get(String(parsed.place.id)).time;
-      if (cleared === null || observedAt > cleared) {
-        const place = parsed.place;
-        db.prepare('INSERT INTO alerts VALUES (?,?,?,?,?,?,?,?)').run(messageId, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt));
+      for (const place of parsed.places) {
+        const cleared = db.prepare('SELECT max(cleared_at) AS time FROM alert_clearances WHERE place_id IN (?,?,?)').get(`${source}:*`, `${source}:${place.id}`, `${source}:region:${place.region}`).time;
+        if (cleared === null || observedAt > cleared) db.prepare('INSERT INTO alerts VALUES (?,?,?,?,?,?,?,?,?)').run(`${source}:${messageId}:${place.id}`, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt), place.region);
       }
     }
     broadcast();

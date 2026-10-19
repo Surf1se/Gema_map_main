@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { createApp } from '../server.js';
 
 async function start(database = ':memory:') {
@@ -86,6 +87,53 @@ test('danger, edits and clear messages update the map feed', async t => {
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
   env.applyPost({ id: 102, date, text: 'ГО Бронницы\nМосковская область\nРакетная опасность' });
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
+});
+
+test('channels use separate message IDs and region clearances', async t => {
+  const env = await start(); t.after(() => env.close()); const request = client(env.url);
+  await request('/register', account());
+  const reader = (await request('/events')).body.getReader(); t.after(() => reader.cancel().catch(() => {}));
+  await nextCount(reader, 1);
+  const date = Date.now();
+  const danger = 'Геленджик\nКраснодарский край\nОпасность по БПЛА';
+  env.applyPost({ source: 'radar_moscoww', id: 101, date, text: danger });
+  await nextCount(reader, 1);
+  env.applyPost({ source: 'radarrussiia', id: 101, date, text: danger });
+  const both = await nextCount(reader, 1);
+  assert.match(both, /"source":"radarrussiia"/);
+  assert.match(both, /"source":"radar_moscoww"/);
+  env.applyPost({ source: 'radarrussiia', id: 102, date: date + 1, text: 'Краснодарский край\nОтбой опасности по БПЛА' });
+  const one = await nextCount(reader, 1);
+  assert.match(one, /"source":"radar_moscoww"/);
+  assert.doesNotMatch(one, /"source":"radarrussiia"/);
+  env.applyPost({ source: 'radarrussiia', id: 101, date, text: danger });
+  assert.doesNotMatch(await nextCount(reader, 1), /"source":"radarrussiia"/);
+  env.applyPost({ source: 'radarrussiia', id: 103, date: date + 2, text: 'Анапа\nКраснодарский край\nОпасность по БПЛА' });
+  assert.match(await nextCount(reader, 1), /"place":"Анапа"/);
+  env.applyPost({ source: 'radarrussiia', id: 104, date: date + 3, text: 'Геленджик\nАнапа\nНовороссийск\nКраснодарский край\nОпасность по БПЛА' });
+  const multiple = await nextCount(reader, 1);
+  assert.match(multiple, /"place":"Новороссийск"/);
+  assert.match(multiple, /"place":"Анапа"/);
+  assert.match(multiple, /"place":"Геленджик"/);
+});
+
+test('existing alerts and clearances migrate to the first channel', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'gema-legacy-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, 'legacy.sqlite');
+  const legacy = new DatabaseSync(path);
+  legacy.exec('CREATE TABLE alerts (message_id TEXT PRIMARY KEY, place_id INTEGER NOT NULL, place_name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius INTEGER NOT NULL, observed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL); CREATE TABLE alert_clearances (place_id TEXT PRIMARY KEY, cleared_at INTEGER NOT NULL)');
+  legacy.prepare('INSERT INTO alerts VALUES (?,?,?,?,?,?,?,?)').run('101', 502965, 'Раменское', 55.56, 38.23, 5000, Date.now(), Date.now() + 86_400_000);
+  legacy.prepare('INSERT INTO alert_clearances VALUES (?,?)').run('*', Date.now() - 1000);
+  legacy.close();
+  const app = createApp({ database: path });
+  app.close();
+  const migrated = new DatabaseSync(path);
+  const alert = migrated.prepare('SELECT message_id,region_code FROM alerts').get();
+  assert.equal(alert.message_id, 'radar_moscoww:101:502965');
+  assert.equal(alert.region_code, '47');
+  assert.match(migrated.prepare('SELECT place_id FROM alert_clearances').get().place_id, /^radar_moscoww:\*$/);
+  migrated.close();
 });
 
 test('cross-site writes are rejected and logout revokes the session', async t => {

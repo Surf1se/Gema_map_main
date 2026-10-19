@@ -31,7 +31,7 @@ function renderAlerts(alerts) {
     const popup = document.createElement('div');
     const title = document.createElement('strong'); title.textContent = `Опасность: ${alert.place}`;
     const note = document.createElement('p'); note.textContent = 'Условный круг по сообщению канала. Это не точная зона опасности.';
-    const source = document.createElement('a'); source.href = `https://t.me/radar_moscoww/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
+    const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
     popup.append(title, note, source); circle.bindPopup(popup);
   }
   $('alerts-count').textContent = `Областей опасности: ${latest.size}`;
@@ -102,7 +102,7 @@ function connect() {
     const data = JSON.parse(event.data);
     $('online-count').textContent = data.online;
     renderAlerts(data.alerts || []);
-    $('feed-status').textContent = ({ off: 'Канал не подключён', connecting: 'Соединяемся с каналом…', connected: 'Канал подключён', error: 'Ошибка канала' })[data.feedStatus] || 'Канал не подключён';
+    $('feed-status').textContent = ({ off: 'Каналы не подключены', connecting: 'Соединяемся с каналами…', connected: 'Каналы подключены', error: 'Ошибка подключения канала' })[data.feedStatus] || 'Каналы не подключены';
   };
   events.onerror = async () => {
     $('connection').textContent = 'Переподключение…';

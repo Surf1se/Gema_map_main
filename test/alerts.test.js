@@ -23,10 +23,23 @@ test('news, predictions and region-only warnings do not create city circles', ()
 
 test('clear message may target a town or all current warnings', () => {
   assert.equal(parsePost('МО Раменское\nОтбой опасности по БПЛА', places).place.id, 502965);
-  assert.deepEqual(parsePost('Московская область\nОтбой опасности по БПЛА', places), { kind: 'clear', place: null });
-  assert.deepEqual(parsePost('Отбой', places), { kind: 'clear', place: null });
+  assert.equal(parsePost('Московская область\nОтбой опасности по БПЛА', places).regions[0], '47');
+  assert.deepEqual(parsePost('Отбой', places).places, []);
   assert.equal(parsePost('МО Раменское\nОтбой', places).place.id, 502965);
   assert.equal(parsePost('МО Раменское\nОпасность по БПЛА\nОтбой опасности по БПЛА', places).kind, 'clear');
+});
+
+test('second channel formats identify cities and scoped clearances', () => {
+  const danger = parsePost('Геленджик и близлежащие\nАнапа и близлежащие\nНовороссийск и близлежащие\nКраснодарский край\nОпасность по БПЛА\n❗️Радар по всей России - @radarrussiia', places);
+  assert.equal(danger.kind, 'danger');
+  assert.deepEqual(danger.places.map(place => place.name), ['Геленджик', 'Анапа', 'Новороссийск']);
+  assert.deepEqual(danger.regions, ['38']);
+  assert.deepEqual(parsePost('Краснодарский край\nРеспублика Адыгея\nОтбой опасности по БПЛА', places).regions, ['38', '01']);
+  assert.equal(parsePost('Пыскор и близлежащие, Пермский край - опасность по БПЛА и в направлении Березники.', places).place?.name, 'Пыскор');
+  assert.equal(parsePost('Геленджик\nКраснодарский край\nТревога по БПЛА', places).kind, 'danger');
+  assert.equal(parsePost('Краснодарский край\nОпасность по БПЛА', places).kind, 'ignore');
+  assert.equal(parsePost('За ночь сбито 149 БПЛА над Кубанью', places).kind, 'ignore');
+  assert.equal(parsePost('Знаменский район\nОрловская область\nФиксация БПЛА', places).kind, 'ignore');
 });
 
 test('warning expires at the next 08:00 Moscow time', () => {
