@@ -49,10 +49,24 @@ test('second channel formats identify cities and scoped clearances', () => {
   assert.deepEqual(danger.regions, ['38']);
   assert.deepEqual(parsePost('Краснодарский край\nРеспублика Адыгея\nОтбой опасности по БПЛА', places).regions, ['38', '01']);
   assert.equal(parsePost('Пыскор и близлежащие, Пермский край - опасность по БПЛА и в направлении Березники.', places).place?.name, 'Пыскор');
+  assert.equal(parsePost('Пыскор и близлежащие, Пермский край - опасность по БПЛА и в направлении Березники.', places).direction?.to.name, 'Березники');
   assert.equal(parsePost('Геленджик\nКраснодарский край\nТревога по БПЛА', places).kind, 'danger');
   assert.equal(parsePost('Краснодарский край\nОпасность по БПЛА', places).place.areaType, 'region');
   assert.equal(parsePost('За ночь сбито 149 БПЛА над Кубанью', places).kind, 'ignore');
   assert.equal(parsePost('Знаменский район\nОрловская область\nФиксация БПЛА', places).kind, 'danger');
+});
+
+test('direction needs one known origin and one known destination', () => {
+  const directed = parsePost('МО Раменское\nМосковская область\nФиксация БПЛА в направлении Подольска', places);
+  assert.equal(directed.place.name, 'Раменское');
+  assert.equal(directed.direction?.from.name, 'Раменское');
+  assert.equal(directed.direction?.to.name, 'Подольск');
+  assert.equal(parsePost('МО Раменское\nФиксация БПЛА в направлении\nПодольск', places).direction?.to.name, 'Подольск');
+  assert.equal(parsePost('БПЛА из Раменского в направлении Подольска', places).direction?.from.name, 'Раменское');
+  assert.equal(parsePost('Фиксация БПЛА из Москвы в направлении Подольска', places).direction?.to.name, 'Подольск');
+  assert.equal(parsePost('МО Раменское\nФиксация БПЛА в направлении неизвестного места', places).direction, null);
+  assert.equal(parsePost('Раменское\nБронницы\nФиксация БПЛА в направлении Подольска', places).direction, null);
+  assert.equal(parsePost('Фиксация БПЛА в направлении Подольска', places).direction, null);
 });
 
 test('additional explicit danger phrases require a recognized place', () => {

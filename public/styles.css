@@ -52,6 +52,17 @@ h1{font-size:28px;font-weight:500;line-height:1.3;letter-spacing:-1px;margin:16p
 .alert-toast strong{display:block;font-size:12px;word-break:break-word}
 .alert-toast small{display:block;color:#687b74;margin-top:3px}
 .alert-toast button{position:absolute;right:8px;top:6px;border:0;background:transparent;color:#526760;font-size:23px;line-height:1;width:30px;height:30px}
+.admin-point{background:transparent;border:0}
+.admin-diamond{display:block;width:14px;height:14px;margin:2px;transform:rotate(45deg);border:2px solid #fff;box-shadow:0 1px 5px #19322d80;background:#ed3030}
+.admin-point--stale .admin-diamond{background:#9299a0}
+.admin-point--clear .admin-diamond{background:#2baa62}
+.direction-marker{background:transparent;border:0}
+.direction-glyph{display:block;width:64px;height:32px;transform:rotate(var(--direction-angle));transform-origin:0 50%;filter:drop-shadow(0 1px 2px #10282b99)}
+.direction-glyph svg{display:block;width:64px;height:32px;overflow:visible}
+.direction-line,.direction-head{fill:none;stroke:#075e79;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 1.5px #fff)}
+.direction-drone{fill:#fff;stroke:#075e79;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;animation:drone-glide 2s ease-in-out infinite}
+@keyframes drone-glide{0%,100%{transform:translateX(0)}50%{transform:translateX(5px)}}
+@media(prefers-reduced-motion:reduce){.direction-drone{animation:none}}
 dialog{border:1px solid #dce6da;border-radius:20px;padding:30px 34px;width:min(450px,calc(100% - 28px));max-height:calc(100dvh - 28px);color:#243c31;background:#f9fbf6;box-shadow:0 25px 100px #0c282b60}
 dialog::backdrop{background:#10272290;backdrop-filter:blur(5px)}
 .dialog-brand{font-size:10px;letter-spacing:2px;display:flex;align-items:center;gap:10px;margin-bottom:25px}

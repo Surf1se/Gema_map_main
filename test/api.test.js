@@ -127,6 +127,24 @@ test('detection messages refresh the named city or region', async t => {
   assert.equal(city.alerts[0].observedAt, date + 2);
 });
 
+test('direction is attached to its origin and disappears after clearance', async t => {
+  const env = await start(); t.after(() => env.close()); const request = client(env.url);
+  await request('/register', account());
+  const reader = (await request('/events')).body.getReader(); t.after(() => reader.cancel().catch(() => {}));
+  await nextCount(reader, 1);
+  const date = Date.now();
+  const snapshot = async () => JSON.parse((await nextCount(reader, 1)).match(/data: (\{[^\n]+\})/u)[1]);
+  env.applyPost({ id: 401, date, text: 'МО Раменское\nМосковская область\nФиксация БПЛА в направлении Подольска' });
+  const danger = await snapshot();
+  assert.equal(danger.alerts[0].place, 'Раменское');
+  assert.equal(danger.alerts[0].direction.from.name, 'Раменское');
+  assert.equal(danger.alerts[0].direction.to.name, 'Подольск');
+  env.applyPost({ id: 402, date: date + 1, text: 'МО Раменское\nМосковская область\nОтбой' });
+  const cleared = await snapshot();
+  assert.equal(cleared.alerts.length, 0);
+  assert.equal(cleared.clearances[0].place, 'Раменское');
+});
+
 test('district and region warnings clear at the intended scope', async t => {
   const env = await start(); t.after(() => env.close()); const request = client(env.url);
   await request('/register', account());

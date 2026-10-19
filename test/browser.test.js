@@ -88,6 +88,38 @@ test('regions gray after an hour, cities stay red and show publication time unti
   await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].every(path => path.getAttribute('fill') !== '#2baa62'));
 });
 
+test('missing boundaries use small diamonds and directions show an animated drone arrow', { timeout: 30_000 }, async t => {
+  const instance = createApp({ database: ':memory:', secureCookies: false, boundaryLookup: async () => null });
+  instance.applyPost({ id: 501, date: Date.now(), text: 'Московская область\nОпасность по БПЛА' });
+  instance.applyPost({ id: 502, date: Date.now(), text: 'МО Раменское\nМосковская область\nФиксация БПЛА в направлении Подольска' });
+  const server = instance.app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox'] });
+  t.after(async () => { await browser.close(); instance.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.clock.install();
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator('#name').fill('Карта'); await page.locator('#email').fill('direction@example.com'); await page.locator('#password').fill('correct horse battery');
+  await page.locator('#auth-submit').click();
+  await page.locator('#auth-dialog').waitFor({ state: 'hidden' });
+  await page.locator('.leaflet-alert-region-pane .admin-point').waitFor();
+  assert.equal(await page.locator('.leaflet-alert-region-pane path').count(), 0);
+  assert.equal(await page.locator('.leaflet-alert-region-pane .admin-diamond').count(), 1);
+  const arrow = page.locator('.leaflet-alert-direction-pane .direction-marker');
+  await arrow.waitFor();
+  assert.equal(await arrow.locator('.direction-drone').evaluate(node => getComputedStyle(node).animationName), 'drone-glide');
+  await arrow.hover();
+  assert.match(await page.locator('.leaflet-tooltip').textContent(), /Раменское → Подольск/);
+  await page.clock.fastForward(45 * 60_000 + 10);
+  await arrow.waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.leaflet-alert-settlement-pane path[fill="#ed3030"]').count(), 1);
+  await page.clock.setSystemTime(new Date());
+  instance.applyPost({ id: 504, date: Date.now(), text: 'МО Раменское\nМосковская область\nФиксация БПЛА в направлении Подольска' });
+  await arrow.waitFor();
+  instance.applyPost({ id: 503, date: Date.now() + 1, text: 'МО Раменское\nМосковская область\nОтбой' });
+  await arrow.waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.leaflet-alert-settlement-pane path[fill="#2baa62"]').count(), 1);
+});
+
 test('map stays visible while online count follows users on desktop and mobile', { timeout: 60_000 }, async t => {
   const polygon = { type: 'Polygon', coordinates: [[[38.17, 55.48], [38.35, 55.48], [38.35, 55.61], [38.17, 55.61], [38.17, 55.48]]] };
   const instance = createApp({ database: ':memory:', secureCookies: false, boundaryLookup: async place => place.name === 'Раменское' ? polygon : null });

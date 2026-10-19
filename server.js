@@ -33,6 +33,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     db.exec('ALTER TABLE alerts ADD COLUMN published_at INTEGER');
     db.exec('UPDATE alerts SET published_at=observed_at');
   }
+  if (!db.prepare('PRAGMA table_info(alerts)').all().some(column => column.name === 'direction_json')) db.exec('ALTER TABLE alerts ADD COLUMN direction_json TEXT');
   if (!db.prepare('PRAGMA table_info(recent_clearances)').all().some(column => column.name === 'published_at')) {
     db.exec('ALTER TABLE recent_clearances ADD COLUMN published_at INTEGER');
     db.exec('UPDATE recent_clearances SET published_at=cleared_at');
@@ -113,8 +114,8 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   });
   app.get('/api/me', auth, (req, res) => res.json({ user: { id: req.user.id, name: req.user.name } }));
   const onlineCount = () => new Set([...clients.values()].map(client => client.userId)).size;
-  const alerts = () => db.prepare('SELECT a.message_id AS messageKey, a.place_id AS placeId, a.place_name AS place, a.area_type AS areaType, a.latitude, a.longitude, a.radius, a.observed_at AS observedAt, a.published_at AS publishedAt, b.geometry AS boundaryJson FROM alerts a LEFT JOIN place_boundaries b ON b.place_id=a.place_id WHERE a.expires_at>? ORDER BY a.observed_at DESC').all(Date.now())
-    .map(({ messageKey, boundaryJson, ...alert }) => ({ ...alert, source: messageKey.split(':')[0], messageId: messageKey.split(':')[1], boundary: boundaryJson ? JSON.parse(boundaryJson) : null }));
+  const alerts = () => db.prepare('SELECT a.message_id AS messageKey, a.place_id AS placeId, a.place_name AS place, a.area_type AS areaType, a.latitude, a.longitude, a.radius, a.observed_at AS observedAt, a.published_at AS publishedAt, a.direction_json AS directionJson, b.geometry AS boundaryJson FROM alerts a LEFT JOIN place_boundaries b ON b.place_id=a.place_id WHERE a.expires_at>? ORDER BY a.observed_at DESC').all(Date.now())
+    .map(({ messageKey, boundaryJson, directionJson, ...alert }) => ({ ...alert, source: messageKey.split(':')[0], messageId: messageKey.split(':')[1], boundary: boundaryJson ? JSON.parse(boundaryJson) : null, direction: directionJson && alert.observedAt + 45 * 60_000 > Date.now() ? JSON.parse(directionJson) : null }));
   const clearances = () => db.prepare('SELECT c.place_id AS placeId, c.place_name AS place, c.area_type AS areaType, c.latitude, c.longitude, c.radius, c.cleared_at AS observedAt, c.published_at AS publishedAt, c.expires_at AS expiresAt, b.geometry AS boundaryJson FROM recent_clearances c LEFT JOIN place_boundaries b ON b.place_id=c.place_id WHERE c.expires_at>? ORDER BY c.cleared_at DESC').all(Date.now())
     .map(({ boundaryJson, ...clearance }) => ({ ...clearance, boundary: boundaryJson ? JSON.parse(boundaryJson) : null }));
   function broadcast() {
@@ -199,7 +200,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
       for (const place of parsed.places) {
         const cleared = db.prepare('SELECT max(cleared_at) AS time FROM alert_clearances WHERE place_id IN (?,?,?)').get(`${source}:*`, `${source}:${place.id}`, `${source}:region:${place.region}`).time;
         if (cleared === null || observedAt > cleared) {
-          db.prepare('INSERT INTO alerts (message_id,place_id,place_name,latitude,longitude,radius,observed_at,expires_at,region_code,area_type,published_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(`${source}:${messageId}:${place.id}`, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt), place.region, place.areaType, publicationTime);
+          db.prepare('INSERT INTO alerts (message_id,place_id,place_name,latitude,longitude,radius,observed_at,expires_at,region_code,area_type,published_at,direction_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(`${source}:${messageId}:${place.id}`, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt), place.region, place.areaType, publicationTime, parsed.direction?.from.id === place.id ? JSON.stringify(parsed.direction) : null);
           db.prepare('DELETE FROM recent_clearances WHERE source=? AND place_id=? AND cleared_at<?').run(source, place.id, observedAt);
           if (place.areaType !== 'settlement') scheduleBoundary(place);
         }

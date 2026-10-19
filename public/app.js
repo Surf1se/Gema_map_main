@@ -5,7 +5,7 @@ map.attributionControl.setPrefix(false);
 map.attributionControl.addAttribution('<a href="https://www.geonames.org/">GeoNames</a>');
 map.attributionControl.addAttribution('&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors');
 L.control.zoom({ position: 'bottomright' }).addTo(map);
-for (const [type, order] of [['region', 410], ['district', 420], ['settlement', 430]]) {
+for (const [type, order] of [['region', 410], ['district', 420], ['settlement', 430], ['direction', 440]]) {
   map.createPane(`alert-${type}`).style.zIndex = order;
 }
 function addOpenStreetMapTiles() {
@@ -39,6 +39,7 @@ let currentAlerts = [];
 let currentClearances = [];
 let freshnessTimer;
 const alertLayers = new Map();
+const directionLayers = new Map();
 const toastTimers = new Map();
 const initials = name => [...name.trim()].slice(0, 2).join('').toUpperCase();
 const publicationTime = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -69,6 +70,41 @@ function alertStyle(alert, now) {
   return { color: '#59636b', weight: 2.5, opacity: 0.95, fillColor: stale ? '#9299a0' : '#df3b3b', fillOpacity: 0.44 };
 }
 
+function adminIcon(alert, now) {
+  const status = alert.cleared ? 'clear' : now - alert.observedAt >= 60 * 60_000 ? 'stale' : 'active';
+  return L.divIcon({ className: `admin-point admin-point--${status}`, html: '<span class="admin-diamond"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
+}
+
+function directionIcon(direction) {
+  const from = map.project([direction.from.latitude, direction.from.longitude], 8);
+  const to = map.project([direction.to.latitude, direction.to.longitude], 8);
+  const angle = Math.atan2(to.y - from.y, to.x - from.x) * 180 / Math.PI;
+  return L.divIcon({ className: 'direction-marker', iconSize: [64, 32], iconAnchor: [0, 16],
+    html: `<span class="direction-glyph" style="--direction-angle:${angle}deg"><svg viewBox="0 0 64 32" aria-hidden="true"><path class="direction-line" d="M7 16H45"/><path class="direction-head" d="m40 11 8 5-8 5"/><g class="direction-drone"><circle cx="27" cy="16" r="3"/><circle cx="18" cy="9" r="3.5"/><circle cx="36" cy="9" r="3.5"/><circle cx="18" cy="23" r="3.5"/><circle cx="36" cy="23" r="3.5"/><path d="M18 9 27 16 36 9M18 23 27 16 36 23"/></g></svg></span>` });
+}
+
+function renderDirections(alerts, now) {
+  const directed = new Map();
+  for (const alert of alerts) if (alert.direction?.from?.id === alert.placeId && alert.observedAt + 45 * 60_000 > now && !directed.has(alert.placeId)) directed.set(alert.placeId, alert);
+  for (const [id, layer] of directionLayers) if (!directed.has(id)) { layer.remove(); directionLayers.delete(id); }
+  for (const [id, alert] of directed) {
+    const direction = alert.direction;
+    let layer = directionLayers.get(id);
+    if (!layer) {
+      layer = L.marker([direction.from.latitude, direction.from.longitude], { pane: 'alert-direction', icon: directionIcon(direction), keyboard: true }).addTo(map);
+      directionLayers.set(id, layer);
+    } else layer.setLatLng([direction.from.latitude, direction.from.longitude]).setIcon(directionIcon(direction));
+    const tip = document.createElement('span');
+    tip.textContent = `${direction.from.name} → ${direction.to.name}. Направление из сообщения, не положение БПЛА.`;
+    layer.bindTooltip(tip, { direction: 'top', offset: [0, -12] });
+    const popup = document.createElement('div');
+    const title = document.createElement('strong'); title.textContent = `${direction.from.name} → ${direction.to.name}`;
+    const note = document.createElement('p'); note.textContent = 'Направление указано в сообщении. Значок не показывает текущее положение БПЛА.';
+    const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
+    popup.append(title, note, source); layer.bindPopup(popup);
+  }
+}
+
 function renderAlerts(alerts, clearances = []) {
   currentAlerts = alerts;
   currentClearances = clearances;
@@ -87,20 +123,20 @@ function renderAlerts(alerts, clearances = []) {
   for (const [id, alert] of latest) {
     const colorChange = alert.cleared ? alert.expiresAt : alert.areaType === 'settlement' ? Infinity : alert.observedAt + 60 * 60_000;
     if (colorChange > now) nextColorChange = Math.min(nextColorChange, colorChange);
-    const kind = alert.areaType === 'settlement' ? 'marker' : alert.boundary ? 'boundary' : 'circle';
+    const kind = alert.areaType === 'settlement' ? 'marker' : alert.boundary ? 'boundary' : 'admin';
     let entry = alertLayers.get(id);
     if (entry?.kind !== kind) {
       entry?.layer.remove();
       const pane = `alert-${alert.areaType || 'settlement'}`;
       const style = alertStyle(alert, now);
       const layer = kind === 'marker' ? L.circleMarker([alert.latitude, alert.longitude], { pane, radius: 9, ...style })
-        : kind === 'boundary' ? L.geoJSON(alert.boundary, { pane, style }) : L.circle([alert.latitude, alert.longitude], { pane, radius: alert.radius, ...style });
+        : kind === 'boundary' ? L.geoJSON(alert.boundary, { pane, style }) : L.marker([alert.latitude, alert.longitude], { pane, icon: adminIcon(alert, now) });
       layer.addTo(map);
       entry = { kind, layer };
       alertLayers.set(id, entry);
     }
-    entry.layer.setStyle(alertStyle(alert, now));
-    if (kind === 'circle') entry.layer.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
+    if (kind === 'admin') entry.layer.setLatLng([alert.latitude, alert.longitude]).setIcon(adminIcon(alert, now));
+    else entry.layer.setStyle(alertStyle(alert, now));
     if (kind === 'marker') {
       entry.layer.setLatLng([alert.latitude, alert.longitude]);
       const tooltip = document.createElement('span');
@@ -112,7 +148,7 @@ function renderAlerts(alerts, clearances = []) {
     const territory = alert.areaType === 'region' ? 'региона' : alert.areaType === 'district' ? 'района' : 'населённого пункта';
     const note = document.createElement('p');
     note.textContent = alert.cleared ? 'Отбой подтверждён. Зелёная отметка исчезнет через 5 минут.'
-      : (kind === 'marker' ? 'Место отмечено маркером.' : kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Примерный круг ${territory}: точный контур не найден. Это не зона опасности.`)
+      : (kind === 'marker' ? 'Место отмечено маркером.' : kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Центральная отметка ${territory}: точный контур не найден. Это не зона опасности.`)
         + (now >= colorChange ? ' Предупреждение не обновлялось более 60 минут.' : '');
     popup.append(title, note);
     if (!alert.cleared) {
@@ -121,6 +157,9 @@ function renderAlerts(alerts, clearances = []) {
     }
     entry.layer.bindPopup(popup);
   }
+  renderDirections(alerts, now);
+  for (const alert of alerts) if (alert.direction && alert.observedAt + 45 * 60_000 > now)
+    nextColorChange = Math.min(nextColorChange, alert.observedAt + 45 * 60_000);
   if (Number.isFinite(nextColorChange)) freshnessTimer = setTimeout(() => renderAlerts(currentAlerts, currentClearances), Math.max(1, nextColorChange - Date.now() + 10));
   $('alerts-count').textContent = `Территорий с опасностью: ${active.size}`;
   $('active-circles-count').textContent = active.size;
