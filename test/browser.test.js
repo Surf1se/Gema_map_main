@@ -28,6 +28,49 @@ test('Yandex tiles use Web Mercator and display the required logo', { timeout: 3
   assert.equal(await page.locator('#yandex-logo').getAttribute('href'), 'https://yandex.ru/maps/');
 });
 
+test('new alerts show dismissible toasts and change from red or blue to yellow after 30 minutes', { timeout: 30_000 }, async t => {
+  const polygon = { type: 'Polygon', coordinates: [[[37.1, 55.3], [38.5, 55.3], [38.5, 56], [37.1, 56], [37.1, 55.3]]] };
+  const instance = createApp({ database: ':memory:', secureCookies: false, boundaryLookup: async () => polygon });
+  instance.applyPost({ id: 301, date: Date.now(), text: 'Московская область\nОпасность по БПЛА' });
+  const server = instance.app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox'] });
+  t.after(async () => { await browser.close(); instance.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.clock.install();
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.locator('#name').fill('Карта'); await page.locator('#email').fill('map@example.com'); await page.locator('#password').fill('correct horse battery');
+  await page.locator('#auth-submit').click();
+  await page.locator('#auth-dialog').waitFor({ state: 'hidden' });
+  const regionPath = page.locator('.leaflet-alert-region-pane path').first();
+  await regionPath.waitFor();
+  assert.equal(await regionPath.getAttribute('fill'), '#df3b3b');
+  assert.equal(await regionPath.getAttribute('stroke'), '#59636b');
+  assert.equal(await page.locator('.alert-toast').count(), 0);
+
+  instance.applyPost({ id: 302, date: Date.now(), text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
+  const cityPath = page.locator('.leaflet-alert-settlement-pane path').first();
+  await cityPath.waitFor();
+  assert.equal(await cityPath.getAttribute('fill'), '#168bd0');
+  assert.equal(await cityPath.getAttribute('stroke'), '#59636b');
+  await page.locator('.alert-toast').waitFor();
+  assert.match(await page.locator('.alert-toast').textContent(), /Раменское/);
+  const toastBox = await page.locator('.alert-toast').boundingBox();
+  assert.ok(toastBox.x > 700 && toastBox.y < 170);
+  await page.locator('.alert-toast button').click();
+  assert.equal(await page.locator('.alert-toast').count(), 0);
+
+  instance.applyPost({ id: 303, date: Date.now(), text: 'ГО Бронницы\nМосковская область\nРакетная опасность' });
+  await page.locator('.alert-toast').waitFor();
+  await page.clock.fastForward(120_001);
+  assert.equal(await page.locator('.alert-toast').count(), 0);
+  await page.clock.fastForward(28 * 60_000 + 5_000);
+  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-region-pane path, .leaflet-alert-settlement-pane path')].every(path => path.getAttribute('fill') === '#f4cc40'));
+  await page.clock.setSystemTime(new Date());
+  instance.applyPost({ id: 302, date: Date.now(), text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
+  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].some(path => path.getAttribute('fill') === '#168bd0'));
+  assert.equal(await page.locator('.alert-toast').count(), 0);
+});
+
 test('map stays visible while online count follows users on desktop and mobile', { timeout: 60_000 }, async t => {
   const polygon = { type: 'Polygon', coordinates: [[[38.17, 55.48], [38.35, 55.48], [38.35, 55.61], [38.17, 55.61], [38.17, 55.48]]] };
   const instance = createApp({ database: ':memory:', secureCookies: false, boundaryLookup: async place => place.name === 'Раменское' ? polygon : null });
@@ -71,6 +114,9 @@ test('map stays visible while online count follows users on desktop and mobile',
   assert.equal(await alice.page.locator('#active-circles-count').textContent(), '1');
   await alice.page.waitForFunction(() => [...document.querySelectorAll('#map path.leaflet-interactive')].some(path => !path.getAttribute('d').includes('a')));
   await bob.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '1');
+  await bob.page.locator('.alert-toast').waitFor();
+  const [mobileHeader, mobileToast] = await Promise.all([bob.page.locator('.map-heading').boundingBox(), bob.page.locator('.alert-toast').boundingBox()]);
+  assert.ok(mobileToast.y > mobileHeader.y + mobileHeader.height);
   assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 1);
   instance.applyPost({ id: 124, date: Date.now(), text: 'Московская область\nОтбой опасности по БПЛА' });
   await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('0'));

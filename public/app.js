@@ -5,6 +5,9 @@ map.attributionControl.setPrefix(false);
 map.attributionControl.addAttribution('<a href="https://www.geonames.org/">GeoNames</a>');
 map.attributionControl.addAttribution('&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors');
 L.control.zoom({ position: 'bottomright' }).addTo(map);
+for (const [type, order] of [['region', 410], ['district', 420], ['settlement', 430]]) {
+  map.createPane(`alert-${type}`).style.zIndex = order;
+}
 function addOpenStreetMapTiles() {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 }
@@ -30,33 +33,73 @@ let user = null;
 let mode = 'register';
 let events = null;
 let alertFit = false;
+let hasReceivedAlerts = false;
+let activeAlertIds = new Set();
+let currentAlerts = [];
+let freshnessTimer;
 const alertLayers = new Map();
+const toastTimers = new Map();
 const initials = name => [...name.trim()].slice(0, 2).join('').toUpperCase();
 function notice(message = '') { $('notice').textContent = message; $('notice').hidden = !message; }
 
+function dismissToast(toast) {
+  clearTimeout(toastTimers.get(toast));
+  toastTimers.delete(toast);
+  toast.remove();
+}
+function showAlertToast(alert) {
+  const toast = document.createElement('div'); toast.className = 'alert-toast';
+  const title = document.createElement('strong'); title.textContent = `Новая опасность: ${alert.place}`;
+  const detail = document.createElement('small'); detail.textContent = alert.areaType === 'region' ? 'Регион на карте' : alert.areaType === 'district' ? 'Район на карте' : 'Населённый пункт на карте';
+  const close = document.createElement('button'); close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', `Закрыть уведомление: ${alert.place}`);
+  close.onclick = () => dismissToast(toast);
+  toast.append(title, detail, close);
+  $('alert-toasts').prepend(toast);
+  toastTimers.set(toast, setTimeout(() => dismissToast(toast), 120_000));
+}
+
+function alertStyle(alert, now) {
+  const stale = now - alert.observedAt >= 30 * 60_000;
+  return { color: '#59636b', weight: 2.5, opacity: 0.95,
+    fillColor: stale ? '#f4cc40' : alert.areaType === 'settlement' ? '#168bd0' : '#df3b3b',
+    fillOpacity: stale ? 0.6 : alert.areaType === 'settlement' ? 0.75 : 0.42 };
+}
+
 function renderAlerts(alerts) {
+  currentAlerts = alerts;
+  clearTimeout(freshnessTimer);
+  const now = Date.now();
   const latest = new Map();
   for (const alert of alerts) if (!latest.has(alert.placeId)) latest.set(alert.placeId, alert);
+  if (hasReceivedAlerts) for (const [id, alert] of latest) if (!activeAlertIds.has(id)) showAlertToast(alert);
+  activeAlertIds = new Set(latest.keys());
+  hasReceivedAlerts = true;
   for (const [id, entry] of alertLayers) if (!latest.has(id)) { entry.layer.remove(); alertLayers.delete(id); }
+  let nextColorChange = Infinity;
   for (const [id, alert] of latest) {
+    const colorChange = alert.observedAt + 30 * 60_000;
+    if (colorChange > now) nextColorChange = Math.min(nextColorChange, colorChange);
     const kind = alert.boundary ? 'boundary' : 'circle';
     let entry = alertLayers.get(id);
     if (entry?.kind !== kind) {
       entry?.layer.remove();
-      const style = { color: '#ba2525', fillColor: '#e44444', fillOpacity: 0.35, weight: 2 };
-      const layer = alert.boundary ? L.geoJSON(alert.boundary, { style }) : L.circle([alert.latitude, alert.longitude], { radius: alert.radius, ...style });
+      const pane = `alert-${alert.areaType || 'settlement'}`;
+      const style = alertStyle(alert, now);
+      const layer = alert.boundary ? L.geoJSON(alert.boundary, { pane, style }) : L.circle([alert.latitude, alert.longitude], { pane, radius: alert.radius, ...style });
       layer.addTo(map);
       entry = { kind, layer };
       alertLayers.set(id, entry);
     }
+    entry.layer.setStyle(alertStyle(alert, now));
     if (kind === 'circle') entry.layer.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
     const popup = document.createElement('div');
     const title = document.createElement('strong'); title.textContent = `Опасность: ${alert.place}`;
     const territory = alert.areaType === 'region' ? 'региона' : alert.areaType === 'district' ? 'района' : 'населённого пункта';
-    const note = document.createElement('p'); note.textContent = kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Примерный круг ${territory}: точный контур не найден. Это не зона опасности.`;
+    const note = document.createElement('p'); note.textContent = (kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Примерный круг ${territory}: точный контур не найден. Это не зона опасности.`) + (now - alert.observedAt >= 30 * 60_000 ? ' Предупреждение не обновлялось более 30 минут.' : '');
     const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
     popup.append(title, note, source); entry.layer.bindPopup(popup);
   }
+  if (Number.isFinite(nextColorChange)) freshnessTimer = setTimeout(() => renderAlerts(currentAlerts), Math.max(1, nextColorChange - Date.now() + 10));
   $('alerts-count').textContent = `Территорий с опасностью: ${latest.size}`;
   $('active-circles-count').textContent = latest.size;
   if (!latest.size) alertFit = false;
@@ -139,6 +182,9 @@ function signedOut() {
   events?.close(); events = null; user = null;
   $('online-count').textContent = '0';
   renderAlerts([]);
+  hasReceivedAlerts = false;
+  activeAlertIds = new Set();
+  for (const toast of toastTimers.keys()) dismissToast(toast);
   $('feed-status').textContent = 'Войдите в аккаунт';
   $('profile-name').textContent = 'Гость';
   $('profile-avatar').textContent = '?';
