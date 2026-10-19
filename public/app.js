@@ -3,11 +3,28 @@ const $ = id => document.getElementById(id);
 const map = L.map('map', { zoomControl: false }).setView([55.75, 37.62], 8);
 map.attributionControl.setPrefix(false);
 map.attributionControl.addAttribution('<a href="https://www.geonames.org/">GeoNames</a>');
+map.attributionControl.addAttribution('&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors');
 L.control.zoom({ position: 'bottomright' }).addTo(map);
-const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-}).addTo(map);
-tiles.on('tileerror', () => notice('Не удалось загрузить часть карты. Проверьте интернет-соединение и доступ к tile.openstreetmap.org.'));
+function addOpenStreetMapTiles() {
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+}
+async function loadMapTiles() {
+  let config;
+  try { config = await api('/map-config'); }
+  catch { addOpenStreetMapTiles(); return; }
+  if (config.provider !== 'yandex' || !config.key) { addOpenStreetMapTiles(); return; }
+  const url = `https://tiles.api-maps.yandex.ru/v1/tiles/?apikey=${encodeURIComponent(config.key)}&lang=ru_RU&x={x}&y={y}&z={z}&l=map&maptype=map&projection=web_mercator`;
+  const tiles = L.tileLayer(url, { maxZoom: 20 });
+  tiles.once('tileerror', () => {
+    tiles.remove();
+    $('yandex-logo').hidden = true;
+    addOpenStreetMapTiles();
+    notice('Не удалось загрузить карту Яндекса. Показана карта OpenStreetMap. Проверьте ключ Tiles API.');
+  });
+  $('yandex-logo').hidden = false;
+  tiles.addTo(map);
+}
+loadMapTiles();
 
 let user = null;
 let mode = 'register';

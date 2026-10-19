@@ -23,6 +23,18 @@ function client(url) {
 }
 const account = (email = 'alice@example.com') => ({ email, password: 'correct horse battery', name: 'Алиса' });
 
+test('map configuration enables Yandex only with a Tiles API key', async t => {
+  const withoutKey = await start(':memory:', { yandexTilesKey: '' });
+  t.after(() => withoutKey.close());
+  assert.deepEqual(await (await fetch(withoutKey.url + '/api/map-config')).json(), { provider: 'openstreetmap' });
+  const withKey = await start(':memory:', { yandexTilesKey: 'test-tiles-key' });
+  t.after(() => withKey.close());
+  const response = await fetch(withKey.url + '/api/map-config');
+  assert.deepEqual(await response.json(), { provider: 'yandex', key: 'test-tiles-key' });
+  assert.match(response.headers.get('content-security-policy'), /tiles\.api-maps\.yandex\.ru/);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+});
+
 async function nextCount(reader, expected) {
   const decoder = new TextDecoder();
   while (true) {

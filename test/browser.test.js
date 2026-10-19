@@ -2,8 +2,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createApp } from '../server.js';
+
+test('Yandex tiles use Web Mercator and display the required logo', { timeout: 30_000 }, async t => {
+  const instance = createApp({ database: ':memory:', secureCookies: false, yandexTilesKey: 'test-tiles-key' });
+  const server = instance.app.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox'] });
+  t.after(async () => { await browser.close(); instance.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  const page = await browser.newPage();
+  const tileRequests = [];
+  const logo = fileURLToPath(new URL('../public/yandex-logo.png', import.meta.url));
+  await page.route('https://tiles.api-maps.yandex.ru/**', route => {
+    tileRequests.push(new URL(route.request().url()));
+    return route.fulfill({ path: logo, contentType: 'image/png' });
+  });
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.waitForFunction(() => document.querySelector('#yandex-logo')?.offsetParent !== null);
+  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-tile')].some(tile => tile.complete && tile.naturalWidth));
+  assert.ok(tileRequests.length > 0);
+  assert.equal(tileRequests[0].searchParams.get('apikey'), 'test-tiles-key');
+  assert.equal(tileRequests[0].searchParams.get('projection'), 'web_mercator');
+  assert.equal(tileRequests[0].searchParams.get('lang'), 'ru_RU');
+  assert.equal(await page.locator('#yandex-logo').getAttribute('href'), 'https://yandex.ru/maps/');
+});
 
 test('map stays visible while online count follows users on desktop and mobile', { timeout: 60_000 }, async t => {
   const polygon = { type: 'Polygon', coordinates: [[[38.17, 55.48], [38.35, 55.48], [38.35, 55.61], [38.17, 55.61], [38.17, 55.48]]] };

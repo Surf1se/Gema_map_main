@@ -2,7 +2,7 @@ import express from 'express';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPlaceIndex, nextMoscowReset, parsePost } from './lib/alerts.js';
@@ -14,7 +14,7 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const lifetime = 7 * 24 * 60 * 60 * 1000;
 let cachedPlaces;
 
-export function createApp({ database = join(root, '.data', 'gema.sqlite'), secureCookies = process.env.NODE_ENV === 'production', boundaryLookup = lookupBoundary } = {}) {
+export function createApp({ database = join(root, '.data', 'gema.sqlite'), secureCookies = process.env.NODE_ENV === 'production', boundaryLookup = lookupBoundary, yandexTilesKey = process.env.YANDEX_TILES_API_KEY } = {}) {
   if (database !== ':memory:') mkdirSync(dirname(database), { recursive: true });
   const db = new DatabaseSync(database);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
@@ -41,7 +41,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   app.disable('x-powered-by');
   app.use((req, res, next) => {
     res.set({ 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'geolocation=()',
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" });
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://tiles.api-maps.yandex.ru; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" });
     if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       if (req.get('sec-fetch-site') === 'cross-site') return res.status(403).json({ error: 'Запрос с другого сайта запрещён.' });
@@ -51,6 +51,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     next();
   });
   app.use(express.json({ limit: '4kb' }));
+  app.get('/api/map-config', (req, res) => res.json(yandexTilesKey?.trim() ? { provider: 'yandex', key: yandexTilesKey.trim() } : { provider: 'openstreetmap' }));
   function auth(req, res, next) {
     const cookie = req.headers.cookie?.split(';').map(s => s.trim()).find(s => s.startsWith('gema_session='))?.slice(13);
     const session = cookie && db.prepare('SELECT users.id, users.name, sessions.token FROM sessions JOIN users ON users.id=sessions.user_id WHERE token=? AND expires_at>?').get(digest(cookie), Date.now());
@@ -210,6 +211,8 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  const envPath = join(root, '.env');
+  if (existsSync(envPath)) process.loadEnvFile(envPath);
   const { app, applyPost, setFeedStatus } = createApp();
   const port = Number(process.env.PORT || 3000);
   app.listen(port, process.env.HOST || '0.0.0.0', () => console.log(`Gema Map listening on port ${port}`));
