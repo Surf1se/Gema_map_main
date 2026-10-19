@@ -10,12 +10,14 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "telegram:login": "node scripts/telegram-login.js",
+    "telegram:login:qr": "node scripts/telegram-login-qr.js",
     "test": "node --test test/api.test.js test/alerts.test.js",
     "test:browser": "node --test test/browser.test.js"
   },
   "dependencies": {
     "express": "5.1.0",
     "leaflet": "1.9.4",
+    "qrcode-terminal": "^0.12.0",
     "teleproto": "^1.230.1"
   },
   "devDependencies": {
