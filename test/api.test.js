@@ -89,8 +89,11 @@ test('danger, edits and clear messages update the map feed', async t => {
   const reader = (await request('/events')).body.getReader(); t.after(() => reader.cancel().catch(() => {}));
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
   const date = Date.now();
-  env.applyPost({ id: 101, date, text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
-  assert.match(await nextCount(reader, 1), /"place":"Раменское"/);
+  const publishedAt = date - 60_000;
+  env.applyPost({ id: 101, date, publishedAt, text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
+  const firstDanger = await nextCount(reader, 1);
+  assert.match(firstDanger, /"place":"Раменское"/);
+  assert.match(firstDanger, new RegExp(`"publishedAt":${publishedAt}`));
   env.applyPost({ id: 101, date, text: 'МО Раменское\nСбитие БПЛА' });
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
   env.applyPost({ id: 102, date, text: 'ГО Бронницы\nМосковская область\nРакетная опасность' });
@@ -166,6 +169,7 @@ test('existing alerts and clearances migrate to the first channel', t => {
   const alert = migrated.prepare('SELECT message_id,region_code FROM alerts').get();
   assert.equal(alert.message_id, 'radar_moscoww:101:502965');
   assert.equal(alert.region_code, '47');
+  assert.ok(migrated.prepare('SELECT published_at FROM alerts').get().published_at > 0);
   assert.match(migrated.prepare('SELECT place_id FROM alert_clearances').get().place_id, /^radar_moscoww:\*$/);
   migrated.close();
 });

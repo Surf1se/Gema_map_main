@@ -41,6 +41,7 @@ let freshnessTimer;
 const alertLayers = new Map();
 const toastTimers = new Map();
 const initials = name => [...name.trim()].slice(0, 2).join('').toUpperCase();
+const publicationTime = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 function notice(message = '') { $('notice').textContent = message; $('notice').hidden = !message; }
 
 function dismissToast(toast) {
@@ -63,10 +64,9 @@ function alertStyle(alert, now) {
   if (alert.cleared) return alert.areaType === 'settlement'
     ? { color: '#ffffff', weight: 2.5, opacity: 1, fillColor: '#2baa62', fillOpacity: 1 }
     : { color: '#59636b', weight: 2.5, opacity: 0.95, fillColor: '#38b66d', fillOpacity: 0.44 };
-  const stale = now - alert.observedAt >= (alert.areaType === 'settlement' ? 4 * 60 : 60) * 60_000;
-  return alert.areaType === 'settlement'
-    ? { color: '#ffffff', weight: 2.5, opacity: 1, fillColor: stale ? '#f18b25' : '#ed3030', fillOpacity: 1 }
-    : { color: '#59636b', weight: 2.5, opacity: 0.95, fillColor: stale ? '#9299a0' : '#df3b3b', fillOpacity: 0.44 };
+  if (alert.areaType === 'settlement') return { color: '#ffffff', weight: 2.5, opacity: 1, fillColor: '#ed3030', fillOpacity: 1 };
+  const stale = now - alert.observedAt >= 60 * 60_000;
+  return { color: '#59636b', weight: 2.5, opacity: 0.95, fillColor: stale ? '#9299a0' : '#df3b3b', fillOpacity: 0.44 };
 }
 
 function renderAlerts(alerts, clearances = []) {
@@ -85,7 +85,7 @@ function renderAlerts(alerts, clearances = []) {
   for (const [id, entry] of alertLayers) if (!latest.has(id)) { entry.layer.remove(); alertLayers.delete(id); }
   let nextColorChange = Infinity;
   for (const [id, alert] of latest) {
-    const colorChange = alert.cleared ? alert.expiresAt : alert.observedAt + (alert.areaType === 'settlement' ? 4 * 60 : 60) * 60_000;
+    const colorChange = alert.cleared ? alert.expiresAt : alert.areaType === 'settlement' ? Infinity : alert.observedAt + 60 * 60_000;
     if (colorChange > now) nextColorChange = Math.min(nextColorChange, colorChange);
     const kind = alert.areaType === 'settlement' ? 'marker' : alert.boundary ? 'boundary' : 'circle';
     let entry = alertLayers.get(id);
@@ -101,14 +101,19 @@ function renderAlerts(alerts, clearances = []) {
     }
     entry.layer.setStyle(alertStyle(alert, now));
     if (kind === 'circle') entry.layer.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
-    if (kind === 'marker') entry.layer.setLatLng([alert.latitude, alert.longitude]);
+    if (kind === 'marker') {
+      entry.layer.setLatLng([alert.latitude, alert.longitude]);
+      const tooltip = document.createElement('span');
+      tooltip.textContent = `${alert.place} · ${alert.cleared ? 'Отбой опубликован' : 'Опубликовано'}: ${publicationTime.format(new Date(alert.publishedAt ?? alert.observedAt))} МСК`;
+      entry.layer.bindTooltip(tooltip, { direction: 'top', offset: [0, -8] });
+    }
     const popup = document.createElement('div');
     const title = document.createElement('strong'); title.textContent = `${alert.cleared ? 'Отбой' : 'Опасность'}: ${alert.place}`;
     const territory = alert.areaType === 'region' ? 'региона' : alert.areaType === 'district' ? 'района' : 'населённого пункта';
     const note = document.createElement('p');
     note.textContent = alert.cleared ? 'Отбой подтверждён. Зелёная отметка исчезнет через 5 минут.'
       : (kind === 'marker' ? 'Место отмечено маркером.' : kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Примерный круг ${territory}: точный контур не найден. Это не зона опасности.`)
-        + (now >= colorChange ? ` Предупреждение не обновлялось более ${alert.areaType === 'settlement' ? '4 часов' : '60 минут'}.` : '');
+        + (now >= colorChange ? ' Предупреждение не обновлялось более 60 минут.' : '');
     popup.append(title, note);
     if (!alert.cleared) {
       const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
