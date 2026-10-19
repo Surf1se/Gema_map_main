@@ -19,7 +19,20 @@ const client = new TelegramClient(new StringSession(existsSync(sessionPath) ? re
 try {
   await client.start({
     phoneNumber: () => rl.question('Номер Telegram с кодом страны: '),
-    phoneCode: () => rl.question('Код входа Telegram: '),
+    phoneCode: (_isCodeViaApp, info) => {
+      const destination = {
+        app: 'Откройте чат «Telegram» с синей галочкой в уже авторизованном приложении. Это не чат «Verification Codes».',
+        sms: 'Проверьте SMS на указанном номере.',
+        call: 'Проверьте входящий звонок на указанном номере.',
+        flashCall: 'Проверьте входящий звонок на указанном номере.',
+        missedCall: 'Проверьте пропущенный звонок на указанном номере.',
+        fragment: 'Проверьте способ получения кода через Fragment, указанный Telegram.',
+        smsWord: 'Проверьте SMS со словом для входа.',
+        smsPhrase: 'Проверьте SMS с фразой для входа.'
+      }[info?.type] || 'Проверьте способ доставки кода, указанный Telegram.';
+      console.log(destination);
+      return rl.question('Код входа Telegram: ');
+    },
     password: () => rl.question('Пароль двухэтапной проверки, если запрошен: '),
     emailAddress: () => rl.question('Email для входа, если запрошен: '),
     emailVerification: async () => ({ type: 'code', code: await rl.question('Код из email: ') }),
