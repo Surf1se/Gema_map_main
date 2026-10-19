@@ -11,12 +11,12 @@ test('explicit danger identifies the intended settlement, not a similarly named 
   assert.equal(parsePost('ГО Бронницы\nМосковская область\nРакетная опасность', places).place.name, 'Бронницы');
 });
 
-test('news and predictions do not create warnings', () => {
+test('unrelated news and predictions do not create warnings', () => {
   for (const text of [
-    'МО Раменское\nСбитие БПЛА',
     'МО Раменское\nПрогноз ракетной опасности на ночь',
     'МО Раменское\nОпасности по БПЛА нет',
-    'Раменское\nВозможная опасность по БПЛА'
+    'Раменское\nВозможная опасность по БПЛА',
+    'За ночь сбито 149 БПЛА над Кубанью'
   ]) assert.equal(parsePost(text, places).kind, 'ignore', text);
 });
 
@@ -56,12 +56,28 @@ test('second channel formats identify cities and scoped clearances', () => {
 });
 
 test('additional explicit danger phrases require a recognized place', () => {
-  for (const phrase of ['Работа ПВО по БПЛА', 'Фиксация БПЛА', 'Фиксации БПЛА', 'рокетная опастность', 'угроза', 'Угроза БПЛА']) {
+  for (const phrase of ['Работа ПВО по БПЛА', 'Фиксация БПЛА', 'Фиксации БПЛА', 'рокетная опастность', 'угроза', 'Угроза БПЛА',
+    'массовые фиксации', 'Массовые фиксации БПЛА', 'Сбитие БПЛА', 'Фиксация реактивной цели', 'Фиксация группы БПЛА',
+    'Внимание к возможному массовому налёту БПЛА', 'Внимание по БПЛА', 'Приготовится к возможной массовой атаки БПЛА',
+    'Приготовиться к возможной массовой атаке БПЛА', 'Фиксация БПЛА в направлении', 'Фиксации БПЛА в направлении']) {
     assert.equal(parsePost(`МО Раменское\nМосковская область\n${phrase}`, places).kind, 'danger', phrase);
     assert.equal(parsePost(`Раменское — ${phrase}`, places).kind, 'danger', phrase);
     assert.equal(parsePost(phrase, places).kind, 'ignore', phrase);
   }
   assert.equal(parsePost('МО Раменское\nНет угрозы', places).kind, 'ignore');
+});
+
+test('places named inside detection messages are resolved in Russian cases', () => {
+  assert.equal(parsePost('Зафиксировали в Москве', places).place?.name, 'Москва');
+  assert.equal(parsePost('Зафиксировали БПЛА в Раменском', places).place?.name, 'Раменское');
+  assert.equal(parsePost('БПЛА зафиксировали в Подольске', places).place?.name, 'Подольск');
+  assert.equal(parsePost('Зафиксировали в Московской области', places).place?.areaType, 'region');
+  assert.equal(parsePost('Массовые фиксации БПЛА в Краснодарском крае', places).place?.areaType, 'region');
+  assert.equal(parsePost('Фиксация БПЛА в направлении Москвы', places).place?.name, 'Москва');
+  assert.equal(parsePost('Сбитие БПЛА в «Раменском»', places).place?.name, 'Раменское');
+  assert.equal(parsePost('Массовые фиксации БПЛА: Раменское', places).place?.name, 'Раменское');
+  assert.equal(parsePost('Сбитие БПЛА в Раменском, Подольске', places).places.length, 2);
+  assert.equal(parsePost('Зафиксировали в неизвестном месте', places).kind, 'ignore');
 });
 
 test('misspelled danger and clearance still require a named settlement', () => {

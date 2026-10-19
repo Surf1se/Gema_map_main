@@ -94,7 +94,11 @@ test('danger, edits and clear messages update the map feed', async t => {
   const firstDanger = await nextCount(reader, 1);
   assert.match(firstDanger, /"place":"Раменское"/);
   assert.match(firstDanger, new RegExp(`"publishedAt":${publishedAt}`));
-  env.applyPost({ id: 101, date, text: 'МО Раменское\nСбитие БПЛА' });
+  env.applyPost({ id: 101, date: date + 1, publishedAt, text: 'МО Раменское\nСбитие БПЛА' });
+  const updated = await nextCount(reader, 1);
+  assert.match(updated, /"place":"Раменское"/);
+  assert.match(updated, new RegExp(`"observedAt":${date + 1},"publishedAt":${publishedAt}`));
+  env.applyPost({ id: 101, date: date + 2, text: 'МО Раменское\nСводка за день' });
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
   env.applyPost({ id: 102, date, text: 'ГО Бронницы\nМосковская область\nРакетная опасность' });
   assert.match(await nextCount(reader, 1), /"place":"Бронницы"/);
@@ -102,6 +106,25 @@ test('danger, edits and clear messages update the map feed', async t => {
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
   env.applyPost({ id: 102, date, text: 'ГО Бронницы\nМосковская область\nРакетная опасность' });
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
+});
+
+test('detection messages refresh the named city or region', async t => {
+  const env = await start(); t.after(() => env.close()); const request = client(env.url);
+  await request('/register', account());
+  const reader = (await request('/events')).body.getReader(); t.after(() => reader.cancel().catch(() => {}));
+  await nextCount(reader, 1);
+  const date = Date.now();
+  const snapshot = async () => JSON.parse((await nextCount(reader, 1)).match(/data: (\{[^\n]+\})/u)[1]);
+  env.applyPost({ id: 301, date, text: 'Московская область\nОпасность по БПЛА' });
+  assert.equal((await snapshot()).alerts[0].areaType, 'region');
+  env.applyPost({ id: 302, date: date + 1, text: 'Массовые фиксации в Московской области' });
+  const region = await snapshot();
+  assert.equal(region.alerts[0].areaType, 'region');
+  assert.equal(region.alerts[0].observedAt, date + 1);
+  env.applyPost({ id: 303, date: date + 2, text: 'Зафиксировали в Раменском' });
+  const city = await snapshot();
+  assert.equal(city.alerts[0].place, 'Раменское');
+  assert.equal(city.alerts[0].observedAt, date + 2);
 });
 
 test('district and region warnings clear at the intended scope', async t => {
