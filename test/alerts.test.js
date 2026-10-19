@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadPlaceIndex, nextMoscowReset, parsePost } from '../lib/alerts.js';
+import { loadPlaceIndex, parsePost } from '../lib/alerts.js';
 
 const places = loadPlaceIndex();
 
@@ -99,9 +99,4 @@ test('misspelled danger and clearance still require a named settlement', () => {
   assert.equal(parsePost('Раменское - ракетная опастность', places).kind, 'danger');
   assert.equal(parsePost('Геленджик\nКраснодарский край\nОтбой опастности по БПЛА', places).kind, 'clear');
   assert.equal(parsePost('Краснодарский край\nОпастность по БПЛА', places).place.areaType, 'region');
-});
-
-test('warning expires at the next 08:00 Moscow time', () => {
-  assert.equal(nextMoscowReset(Date.parse('2026-10-19T04:59:59Z')), Date.parse('2026-10-19T05:00:00Z'));
-  assert.equal(nextMoscowReset(Date.parse('2026-10-19T05:00:00Z')), Date.parse('2026-10-20T05:00:00Z'));
 });

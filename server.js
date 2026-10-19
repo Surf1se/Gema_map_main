@@ -5,13 +5,14 @@ import { promisify } from 'node:util';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadPlaceIndex, nextMoscowReset, parsePost, regionNameForCode } from './lib/alerts.js';
+import { loadPlaceIndex, parsePost, regionNameForCode } from './lib/alerts.js';
 import { lookupBoundary } from './lib/boundaries.js';
 
 const scrypt = promisify(scryptCallback);
 const root = dirname(fileURLToPath(import.meta.url));
 const digest = value => createHash('sha256').update(value).digest('hex');
 const lifetime = 7 * 24 * 60 * 60 * 1000;
+const alertLifetime = 60 * 60_000;
 let cachedPlaces;
 
 export function createApp({ database = join(root, '.data', 'gema.sqlite'), secureCookies = process.env.NODE_ENV === 'production', boundaryLookup = lookupBoundary, yandexTilesKey = process.env.YANDEX_TILES_API_KEY } = {}) {
@@ -24,6 +25,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     CREATE TABLE IF NOT EXISTS alert_clearances (place_id TEXT PRIMARY KEY, cleared_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS recent_clearances (source TEXT NOT NULL, place_id INTEGER NOT NULL, place_name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius INTEGER NOT NULL, region_code TEXT, area_type TEXT NOT NULL, cleared_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(source,place_id));
     CREATE TABLE IF NOT EXISTS place_boundaries (place_id INTEGER PRIMARY KEY, geometry TEXT, retry_after INTEGER NOT NULL);`);
+  db.exec(`UPDATE alerts SET expires_at=observed_at+${alertLifetime} WHERE expires_at!=observed_at+${alertLifetime}`);
   db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
   db.prepare('DELETE FROM recent_clearances WHERE expires_at<=?').run(Date.now());
   const places = cachedPlaces ||= loadPlaceIndex();
@@ -120,10 +122,23 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     .map(({ boundaryJson, ...clearance }) => ({ ...clearance, boundary: boundaryJson ? JSON.parse(boundaryJson) : null }));
   function broadcast() {
     if (closed) return;
+    db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
     const data = `data: ${JSON.stringify({ online: onlineCount(), alerts: alerts(), clearances: clearances(), feedStatus })}\n\n`;
     for (const [res] of clients) res.write(data);
   }
   let clearanceTimer;
+  let alertExpiryTimer;
+  function scheduleAlertExpiry() {
+    clearTimeout(alertExpiryTimer);
+    const next = db.prepare('SELECT min(expires_at) AS time FROM alerts WHERE expires_at>?').get(Date.now()).time;
+    if (next === null) return;
+    alertExpiryTimer = setTimeout(() => {
+      broadcast();
+      scheduleAlertExpiry();
+    }, Math.max(1, next - Date.now()));
+    alertExpiryTimer.unref();
+  }
+  scheduleAlertExpiry();
   function scheduleClearanceExpiry() {
     clearTimeout(clearanceTimer);
     const next = db.prepare('SELECT min(expires_at) AS time FROM recent_clearances WHERE expires_at>?').get(Date.now()).time;
@@ -175,6 +190,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     const observedAt = Number(date);
     const publicationTime = Number(publishedAt);
     if (!['radar_moscoww', 'radarrussiia'].includes(source) || !/^\d+$/.test(messageId) || !Number.isFinite(observedAt) || !Number.isFinite(publicationTime) || publicationTime > observedAt || observedAt > Date.now() + 60_000) return;
+    db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
     const parsed = parsePost(text, places);
     if (parsed.kind !== 'clear') db.prepare('DELETE FROM alerts WHERE message_id GLOB ?').run(`${source}:${messageId}:*`);
     if (parsed.kind === 'clear') {
@@ -196,16 +212,17 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
       }
       else if (parsed.regions.length) for (const code of parsed.regions) db.prepare('DELETE FROM alerts WHERE message_id GLOB ? AND region_code=? AND observed_at<=?').run(`${source}:*`, code, observedAt);
       else db.prepare('DELETE FROM alerts WHERE message_id GLOB ? AND observed_at<=?').run(`${source}:*`, observedAt);
-    } else if (parsed.kind === 'danger' && nextMoscowReset(observedAt) > Date.now()) {
+    } else if (parsed.kind === 'danger' && observedAt + alertLifetime > Date.now()) {
       for (const place of parsed.places) {
         const cleared = db.prepare('SELECT max(cleared_at) AS time FROM alert_clearances WHERE place_id IN (?,?,?)').get(`${source}:*`, `${source}:${place.id}`, `${source}:region:${place.region}`).time;
         if (cleared === null || observedAt > cleared) {
-          db.prepare('INSERT INTO alerts (message_id,place_id,place_name,latitude,longitude,radius,observed_at,expires_at,region_code,area_type,published_at,direction_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(`${source}:${messageId}:${place.id}`, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt), place.region, place.areaType, publicationTime, parsed.direction?.from.id === place.id ? JSON.stringify(parsed.direction) : null);
+          db.prepare('INSERT INTO alerts (message_id,place_id,place_name,latitude,longitude,radius,observed_at,expires_at,region_code,area_type,published_at,direction_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(`${source}:${messageId}:${place.id}`, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, observedAt + alertLifetime, place.region, place.areaType, publicationTime, parsed.direction?.from.id === place.id ? JSON.stringify(parsed.direction) : null);
           db.prepare('DELETE FROM recent_clearances WHERE source=? AND place_id=? AND cleared_at<?').run(source, place.id, observedAt);
           if (place.areaType !== 'settlement') scheduleBoundary(place);
         }
       }
     }
+    scheduleAlertExpiry();
     scheduleClearanceExpiry();
     broadcast();
   }
@@ -240,17 +257,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     if (changed) broadcast();
   }, 10_000);
   timer.unref();
-  let resetTimer;
-  function scheduleReset() {
-    resetTimer = setTimeout(() => {
-      db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
-      broadcast();
-      scheduleReset();
-    }, nextMoscowReset(Date.now()) - Date.now());
-    resetTimer.unref();
-  }
-  scheduleReset();
-  return { app, applyPost, setFeedStatus, close() { closed = true; clearInterval(timer); clearTimeout(resetTimer); clearTimeout(clearanceTimer); for (const [res] of clients) res.end(); db.close(); } };
+  return { app, applyPost, setFeedStatus, close() { closed = true; clearInterval(timer); clearTimeout(alertExpiryTimer); clearTimeout(clearanceTimer); for (const [res] of clients) res.end(); db.close(); } };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

@@ -28,7 +28,7 @@ test('Yandex tiles use Web Mercator and display the required logo', { timeout: 3
   assert.equal(await page.locator('#yandex-logo').getAttribute('href'), 'https://yandex.ru/maps/');
 });
 
-test('regions gray after an hour, cities stay red and show publication time until clearance', { timeout: 30_000 }, async t => {
+test('regions gray after 30 minutes, all danger markers expire after an hour, and cities show publication time', { timeout: 30_000 }, async t => {
   const polygon = { type: 'Polygon', coordinates: [[[37.1, 55.3], [38.5, 55.3], [38.5, 56], [37.1, 56], [37.1, 55.3]]] };
   const instance = createApp({ database: ':memory:', secureCookies: false, boundaryLookup: async () => polygon });
   instance.applyPost({ id: 301, date: Date.now(), text: 'Московская область\nОпасность по БПЛА' });
@@ -68,19 +68,20 @@ test('regions gray after an hour, cities stay red and show publication time unti
   await page.locator('.alert-toast').waitFor();
   await page.clock.fastForward(120_001);
   assert.equal(await page.locator('.alert-toast').count(), 0);
-  await page.clock.fastForward(58 * 60_000 + 5_000);
+  await page.clock.fastForward(28 * 60_000 + 5_000);
   await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-region-pane path')].every(path => path.getAttribute('fill') === '#9299a0'));
-  assert.ok((await page.locator('.leaflet-alert-settlement-pane path').all()).every(Boolean));
+  assert.equal(await regionPath.getAttribute('fill'), '#9299a0');
   assert.equal(await cityPath.getAttribute('fill'), '#ed3030');
-  await page.clock.fastForward(3 * 60 * 60_000 + 5_000);
-  assert.ok((await page.locator('.leaflet-alert-settlement-pane path').all()).every(Boolean));
-  assert.equal(await cityPath.getAttribute('fill'), '#ed3030');
+  await page.clock.fastForward(30 * 60_000 + 5_000);
+  await regionPath.waitFor({ state: 'detached' });
+  await cityPath.waitFor({ state: 'detached' });
+  assert.equal(await page.locator('#active-circles-count').textContent(), '0');
   await page.clock.setSystemTime(new Date());
   instance.applyPost({ id: 302, date: Date.now(), publishedAt: cityPublishedAt, text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
   await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].some(path => path.getAttribute('fill') === '#ed3030'));
   await cityPath.hover();
   assert.match(await page.locator('.leaflet-tooltip').textContent(), new RegExp(`Опубликовано: ${expectedTime}`));
-  assert.equal(await page.locator('.alert-toast').count(), 0);
+  assert.ok(await page.locator('.alert-toast').count() > 0);
   instance.applyPost({ id: 304, date: Date.now(), text: 'МО Раменское\nМосковская область\nОтбой' });
   await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].some(path => path.getAttribute('fill') === '#2baa62'));
   await page.clock.fastForward(5 * 60_000 + 10);

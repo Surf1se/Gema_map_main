@@ -66,12 +66,12 @@ function alertStyle(alert, now) {
     ? { color: '#ffffff', weight: 2.5, opacity: 1, fillColor: '#2baa62', fillOpacity: 1 }
     : { color: '#59636b', weight: 2.5, opacity: 0.95, fillColor: '#38b66d', fillOpacity: 0.44 };
   if (alert.areaType === 'settlement') return { color: '#ffffff', weight: 2.5, opacity: 1, fillColor: '#ed3030', fillOpacity: 1 };
-  const stale = now - alert.observedAt >= 60 * 60_000;
+  const stale = now - alert.observedAt >= 30 * 60_000;
   return { color: '#59636b', weight: 2.5, opacity: 0.95, fillColor: stale ? '#9299a0' : '#df3b3b', fillOpacity: 0.44 };
 }
 
 function adminIcon(alert, now) {
-  const status = alert.cleared ? 'clear' : now - alert.observedAt >= 60 * 60_000 ? 'stale' : 'active';
+  const status = alert.cleared ? 'clear' : now - alert.observedAt >= 30 * 60_000 ? 'stale' : 'active';
   return L.divIcon({ className: `admin-point admin-point--${status}`, html: '<span class="admin-diamond"></span>', iconSize: [18, 18], iconAnchor: [9, 9] });
 }
 
@@ -111,7 +111,7 @@ function renderAlerts(alerts, clearances = []) {
   clearTimeout(freshnessTimer);
   const now = Date.now();
   const active = new Map();
-  for (const alert of alerts) if (!active.has(alert.placeId)) active.set(alert.placeId, alert);
+  for (const alert of alerts) if (alert.observedAt + 60 * 60_000 > now && !active.has(alert.placeId)) active.set(alert.placeId, alert);
   const latest = new Map();
   for (const clearance of clearances) if (clearance.expiresAt > now && !latest.has(clearance.placeId)) latest.set(clearance.placeId, { ...clearance, cleared: true });
   for (const [id, alert] of active) latest.set(id, alert);
@@ -121,7 +121,9 @@ function renderAlerts(alerts, clearances = []) {
   for (const [id, entry] of alertLayers) if (!latest.has(id)) { entry.layer.remove(); alertLayers.delete(id); }
   let nextColorChange = Infinity;
   for (const [id, alert] of latest) {
-    const colorChange = alert.cleared ? alert.expiresAt : alert.areaType === 'settlement' ? Infinity : alert.observedAt + 60 * 60_000;
+    const expiry = alert.cleared ? alert.expiresAt : alert.observedAt + 60 * 60_000;
+    const colorChange = !alert.cleared && alert.areaType !== 'settlement' ? alert.observedAt + 30 * 60_000 : Infinity;
+    if (expiry > now) nextColorChange = Math.min(nextColorChange, expiry);
     if (colorChange > now) nextColorChange = Math.min(nextColorChange, colorChange);
     const kind = alert.areaType === 'settlement' ? 'marker' : alert.boundary ? 'boundary' : 'admin';
     let entry = alertLayers.get(id);
@@ -149,7 +151,7 @@ function renderAlerts(alerts, clearances = []) {
     const note = document.createElement('p');
     note.textContent = alert.cleared ? 'Отбой подтверждён. Зелёная отметка исчезнет через 5 минут.'
       : (kind === 'marker' ? 'Место отмечено маркером.' : kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Центральная отметка ${territory}: точный контур не найден. Это не зона опасности.`)
-        + (now >= colorChange ? ' Предупреждение не обновлялось более 60 минут.' : '');
+        + (now >= colorChange ? ' Предупреждение не обновлялось более 30 минут.' : '');
     popup.append(title, note);
     if (!alert.cleared) {
       const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
@@ -157,8 +159,8 @@ function renderAlerts(alerts, clearances = []) {
     }
     entry.layer.bindPopup(popup);
   }
-  renderDirections(alerts, now);
-  for (const alert of alerts) if (alert.direction && alert.observedAt + 45 * 60_000 > now)
+  renderDirections([...active.values()], now);
+  for (const alert of active.values()) if (alert.direction && alert.observedAt + 45 * 60_000 > now)
     nextColorChange = Math.min(nextColorChange, alert.observedAt + 45 * 60_000);
   if (Number.isFinite(nextColorChange)) freshnessTimer = setTimeout(() => renderAlerts(currentAlerts, currentClearances), Math.max(1, nextColorChange - Date.now() + 10));
   $('alerts-count').textContent = `Территорий с опасностью: ${active.size}`;

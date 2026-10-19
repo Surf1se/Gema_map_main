@@ -127,6 +127,19 @@ test('detection messages refresh the named city or region', async t => {
   assert.equal(city.alerts[0].observedAt, date + 2);
 });
 
+test('danger disappears from the live feed after 60 minutes and a new post restores it', { timeout: 5_000 }, async t => {
+  const env = await start(); t.after(() => env.close()); const request = client(env.url);
+  await request('/register', account());
+  const reader = (await request('/events')).body.getReader(); t.after(() => reader.cancel().catch(() => {}));
+  const snapshot = async () => JSON.parse((await nextCount(reader, 1)).match(/data: (\{[^\n]+\})/u)[1]);
+  await snapshot();
+  env.applyPost({ id: 601, date: Date.now() - 60 * 60_000 + 600, text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
+  assert.equal((await snapshot()).alerts[0].place, 'Раменское');
+  assert.equal((await snapshot()).alerts.length, 0);
+  env.applyPost({ id: 602, date: Date.now(), text: 'МО Раменское\nМосковская область\nФиксация БПЛА' });
+  assert.equal((await snapshot()).alerts[0].messageId, '602');
+});
+
 test('direction is attached to its origin and disappears after clearance', async t => {
   const env = await start(); t.after(() => env.close()); const request = client(env.url);
   await request('/register', account());
@@ -207,9 +220,10 @@ test('existing alerts and clearances migrate to the first channel', t => {
   const app = createApp({ database: path });
   app.close();
   const migrated = new DatabaseSync(path);
-  const alert = migrated.prepare('SELECT message_id,region_code FROM alerts').get();
+  const alert = migrated.prepare('SELECT message_id,region_code,observed_at,expires_at FROM alerts').get();
   assert.equal(alert.message_id, 'radar_moscoww:101:502965');
   assert.equal(alert.region_code, '47');
+  assert.equal(alert.expires_at, alert.observed_at + 60 * 60_000);
   assert.ok(migrated.prepare('SELECT published_at FROM alerts').get().published_at > 0);
   assert.match(migrated.prepare('SELECT place_id FROM alert_clearances').get().place_id, /^radar_moscoww:\*$/);
   migrated.close();
