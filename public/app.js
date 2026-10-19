@@ -36,6 +36,7 @@ let alertFit = false;
 let hasReceivedAlerts = false;
 let activeAlertIds = new Set();
 let currentAlerts = [];
+let currentClearances = [];
 let freshnessTimer;
 const alertLayers = new Map();
 const toastTimers = new Map();
@@ -59,51 +60,67 @@ function showAlertToast(alert) {
 }
 
 function alertStyle(alert, now) {
-  const stale = now - alert.observedAt >= 30 * 60_000;
-  return { color: '#59636b', weight: 2.5, opacity: 0.95,
-    fillColor: stale ? '#f4cc40' : alert.areaType === 'settlement' ? '#168bd0' : '#df3b3b',
-    fillOpacity: stale ? 0.6 : alert.areaType === 'settlement' ? 0.75 : 0.42 };
+  if (alert.cleared) return alert.areaType === 'settlement'
+    ? { color: '#ffffff', weight: 2.5, opacity: 1, fillColor: '#2baa62', fillOpacity: 1 }
+    : { color: '#59636b', weight: 2.5, opacity: 0.95, fillColor: '#38b66d', fillOpacity: 0.44 };
+  const stale = now - alert.observedAt >= (alert.areaType === 'settlement' ? 4 * 60 : 60) * 60_000;
+  return alert.areaType === 'settlement'
+    ? { color: '#ffffff', weight: 2.5, opacity: 1, fillColor: stale ? '#f18b25' : '#ed3030', fillOpacity: 1 }
+    : { color: '#59636b', weight: 2.5, opacity: 0.95, fillColor: stale ? '#9299a0' : '#df3b3b', fillOpacity: 0.44 };
 }
 
-function renderAlerts(alerts) {
+function renderAlerts(alerts, clearances = []) {
   currentAlerts = alerts;
+  currentClearances = clearances;
   clearTimeout(freshnessTimer);
   const now = Date.now();
+  const active = new Map();
+  for (const alert of alerts) if (!active.has(alert.placeId)) active.set(alert.placeId, alert);
   const latest = new Map();
-  for (const alert of alerts) if (!latest.has(alert.placeId)) latest.set(alert.placeId, alert);
-  if (hasReceivedAlerts) for (const [id, alert] of latest) if (!activeAlertIds.has(id)) showAlertToast(alert);
-  activeAlertIds = new Set(latest.keys());
+  for (const clearance of clearances) if (clearance.expiresAt > now && !latest.has(clearance.placeId)) latest.set(clearance.placeId, { ...clearance, cleared: true });
+  for (const [id, alert] of active) latest.set(id, alert);
+  if (hasReceivedAlerts) for (const [id, alert] of active) if (!activeAlertIds.has(id)) showAlertToast(alert);
+  activeAlertIds = new Set(active.keys());
   hasReceivedAlerts = true;
   for (const [id, entry] of alertLayers) if (!latest.has(id)) { entry.layer.remove(); alertLayers.delete(id); }
   let nextColorChange = Infinity;
   for (const [id, alert] of latest) {
-    const colorChange = alert.observedAt + 30 * 60_000;
+    const colorChange = alert.cleared ? alert.expiresAt : alert.observedAt + (alert.areaType === 'settlement' ? 4 * 60 : 60) * 60_000;
     if (colorChange > now) nextColorChange = Math.min(nextColorChange, colorChange);
-    const kind = alert.boundary ? 'boundary' : 'circle';
+    const kind = alert.areaType === 'settlement' ? 'marker' : alert.boundary ? 'boundary' : 'circle';
     let entry = alertLayers.get(id);
     if (entry?.kind !== kind) {
       entry?.layer.remove();
       const pane = `alert-${alert.areaType || 'settlement'}`;
       const style = alertStyle(alert, now);
-      const layer = alert.boundary ? L.geoJSON(alert.boundary, { pane, style }) : L.circle([alert.latitude, alert.longitude], { pane, radius: alert.radius, ...style });
+      const layer = kind === 'marker' ? L.circleMarker([alert.latitude, alert.longitude], { pane, radius: 9, ...style })
+        : kind === 'boundary' ? L.geoJSON(alert.boundary, { pane, style }) : L.circle([alert.latitude, alert.longitude], { pane, radius: alert.radius, ...style });
       layer.addTo(map);
       entry = { kind, layer };
       alertLayers.set(id, entry);
     }
     entry.layer.setStyle(alertStyle(alert, now));
     if (kind === 'circle') entry.layer.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
+    if (kind === 'marker') entry.layer.setLatLng([alert.latitude, alert.longitude]);
     const popup = document.createElement('div');
-    const title = document.createElement('strong'); title.textContent = `Опасность: ${alert.place}`;
+    const title = document.createElement('strong'); title.textContent = `${alert.cleared ? 'Отбой' : 'Опасность'}: ${alert.place}`;
     const territory = alert.areaType === 'region' ? 'региона' : alert.areaType === 'district' ? 'района' : 'населённого пункта';
-    const note = document.createElement('p'); note.textContent = (kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Примерный круг ${territory}: точный контур не найден. Это не зона опасности.`) + (now - alert.observedAt >= 30 * 60_000 ? ' Предупреждение не обновлялось более 30 минут.' : '');
-    const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
-    popup.append(title, note, source); entry.layer.bindPopup(popup);
+    const note = document.createElement('p');
+    note.textContent = alert.cleared ? 'Отбой подтверждён. Зелёная отметка исчезнет через 5 минут.'
+      : (kind === 'marker' ? 'Место отмечено маркером.' : kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Примерный круг ${territory}: точный контур не найден. Это не зона опасности.`)
+        + (now >= colorChange ? ` Предупреждение не обновлялось более ${alert.areaType === 'settlement' ? '4 часов' : '60 минут'}.` : '');
+    popup.append(title, note);
+    if (!alert.cleared) {
+      const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
+      popup.append(source);
+    }
+    entry.layer.bindPopup(popup);
   }
-  if (Number.isFinite(nextColorChange)) freshnessTimer = setTimeout(() => renderAlerts(currentAlerts), Math.max(1, nextColorChange - Date.now() + 10));
-  $('alerts-count').textContent = `Территорий с опасностью: ${latest.size}`;
-  $('active-circles-count').textContent = latest.size;
+  if (Number.isFinite(nextColorChange)) freshnessTimer = setTimeout(() => renderAlerts(currentAlerts, currentClearances), Math.max(1, nextColorChange - Date.now() + 10));
+  $('alerts-count').textContent = `Территорий с опасностью: ${active.size}`;
+  $('active-circles-count').textContent = active.size;
   if (!latest.size) alertFit = false;
-  else if (!alertFit) {
+  else if (!alertFit && active.size) {
     map.fitBounds(L.featureGroup([...alertLayers.values()].map(entry => entry.layer)).getBounds(), { maxZoom: 9, padding: [40, 40] });
     alertFit = true;
   }
@@ -167,7 +184,7 @@ function connect() {
   events.onmessage = event => {
     const data = JSON.parse(event.data);
     $('online-count').textContent = data.online;
-    renderAlerts(data.alerts || []);
+    renderAlerts(data.alerts || [], data.clearances || []);
     $('feed-status').textContent = ({ off: 'Каналы не подключены', connecting: 'Соединяемся с каналами…', connected: 'Каналы подключены', error: 'Ошибка подключения канала' })[data.feedStatus] || 'Каналы не подключены';
   };
   events.onerror = async () => {

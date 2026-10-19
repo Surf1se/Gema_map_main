@@ -52,7 +52,16 @@ test('second channel formats identify cities and scoped clearances', () => {
   assert.equal(parsePost('Геленджик\nКраснодарский край\nТревога по БПЛА', places).kind, 'danger');
   assert.equal(parsePost('Краснодарский край\nОпасность по БПЛА', places).place.areaType, 'region');
   assert.equal(parsePost('За ночь сбито 149 БПЛА над Кубанью', places).kind, 'ignore');
-  assert.equal(parsePost('Знаменский район\nОрловская область\nФиксация БПЛА', places).kind, 'ignore');
+  assert.equal(parsePost('Знаменский район\nОрловская область\nФиксация БПЛА', places).kind, 'danger');
+});
+
+test('additional explicit danger phrases require a recognized place', () => {
+  for (const phrase of ['Работа ПВО по БПЛА', 'Фиксация БПЛА', 'Фиксации БПЛА', 'рокетная опастность', 'угроза', 'Угроза БПЛА']) {
+    assert.equal(parsePost(`МО Раменское\nМосковская область\n${phrase}`, places).kind, 'danger', phrase);
+    assert.equal(parsePost(`Раменское — ${phrase}`, places).kind, 'danger', phrase);
+    assert.equal(parsePost(phrase, places).kind, 'ignore', phrase);
+  }
+  assert.equal(parsePost('МО Раменское\nНет угрозы', places).kind, 'ignore');
 });
 
 test('misspelled danger and clearance still require a named settlement', () => {

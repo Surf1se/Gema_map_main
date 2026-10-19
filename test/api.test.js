@@ -43,7 +43,7 @@ async function nextCount(reader, expected) {
     const text = decoder.decode(value);
     for (const match of text.matchAll(/data: (\{[^\n]+\})/g)) {
       const data = JSON.parse(match[1]);
-      assert.deepEqual(Object.keys(data), ['online', 'alerts', 'feedStatus']);
+      assert.deepEqual(Object.keys(data), ['online', 'alerts', 'clearances', 'feedStatus']);
       if (data.online === expected) return text;
     }
   }
@@ -115,8 +115,8 @@ test('district and region warnings clear at the intended scope', async t => {
   assert.match(both, /"areaType":"district"/);
   env.applyPost({ id: 203, date: date + 2, text: 'Знаменский район\nОрловская область\nОтбой' });
   const districtClear = await nextCount(reader, 1);
-  assert.match(districtClear, /"areaType":"region"/);
-  assert.doesNotMatch(districtClear, /"areaType":"district"/);
+  assert.match(districtClear, /"alerts":\[\{"placeId"[^\]]*"areaType":"region"/);
+  assert.match(districtClear, /"clearances":\[\{"placeId"[^\]]*"areaType":"district"/);
   env.applyPost({ id: 204, date: date + 3, text: 'Орловская область\nОтбой' });
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
   env.applyPost({ id: 202, date: date + 1, text: 'Орловская область\nОпасность по БПЛА' });
@@ -194,6 +194,30 @@ test('accounts survive restart while online count starts from active connections
   const response = await request('/events'); const reader = response.body.getReader();
   await nextCount(reader, 1);
   await reader.cancel();
+});
+
+test('recent clearances survive restart and expired ones are removed', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'gema-clear-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, 'test.sqlite');
+  const first = createApp({ database: path, boundaryLookup: async () => null });
+  const date = Date.now();
+  first.applyPost({ id: 701, date, text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
+  first.applyPost({ id: 702, date: date + 1, text: 'МО Раменское\nМосковская область\nОтбой' });
+  first.close();
+  const second = createApp({ database: path, boundaryLookup: async () => null });
+  second.close();
+  const db = new DatabaseSync(path);
+  const clearance = db.prepare('SELECT place_name,expires_at FROM recent_clearances').get();
+  assert.equal(clearance.place_name, 'Раменское');
+  assert.equal(clearance.expires_at, date + 1 + 5 * 60_000);
+  db.prepare('UPDATE recent_clearances SET expires_at=?').run(Date.now() - 1);
+  db.close();
+  const third = createApp({ database: path, boundaryLookup: async () => null });
+  third.close();
+  const verified = new DatabaseSync(path);
+  assert.equal(verified.prepare('SELECT count(*) AS count FROM recent_clearances').get().count, 0);
+  verified.close();
 });
 
 test('authentication endpoints limit repeated attempts', async t => {

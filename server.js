@@ -22,8 +22,10 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS alerts (message_id TEXT PRIMARY KEY, place_id INTEGER NOT NULL, place_name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius INTEGER NOT NULL, observed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, region_code TEXT, area_type TEXT NOT NULL DEFAULT 'settlement');
     CREATE TABLE IF NOT EXISTS alert_clearances (place_id TEXT PRIMARY KEY, cleared_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS recent_clearances (source TEXT NOT NULL, place_id INTEGER NOT NULL, place_name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius INTEGER NOT NULL, region_code TEXT, area_type TEXT NOT NULL, cleared_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(source,place_id));
     CREATE TABLE IF NOT EXISTS place_boundaries (place_id INTEGER PRIMARY KEY, geometry TEXT, retry_after INTEGER NOT NULL);`);
   db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
+  db.prepare('DELETE FROM recent_clearances WHERE expires_at<=?').run(Date.now());
   const places = cachedPlaces ||= loadPlaceIndex();
   if (!db.prepare('PRAGMA table_info(alerts)').all().some(column => column.name === 'region_code')) db.exec('ALTER TABLE alerts ADD COLUMN region_code TEXT');
   if (!db.prepare('PRAGMA table_info(alerts)').all().some(column => column.name === 'area_type')) db.exec("ALTER TABLE alerts ADD COLUMN area_type TEXT NOT NULL DEFAULT 'settlement'");
@@ -105,11 +107,26 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   const onlineCount = () => new Set([...clients.values()].map(client => client.userId)).size;
   const alerts = () => db.prepare('SELECT a.message_id AS messageKey, a.place_id AS placeId, a.place_name AS place, a.area_type AS areaType, a.latitude, a.longitude, a.radius, a.observed_at AS observedAt, b.geometry AS boundaryJson FROM alerts a LEFT JOIN place_boundaries b ON b.place_id=a.place_id WHERE a.expires_at>? ORDER BY a.observed_at DESC').all(Date.now())
     .map(({ messageKey, boundaryJson, ...alert }) => ({ ...alert, source: messageKey.split(':')[0], messageId: messageKey.split(':')[1], boundary: boundaryJson ? JSON.parse(boundaryJson) : null }));
+  const clearances = () => db.prepare('SELECT c.place_id AS placeId, c.place_name AS place, c.area_type AS areaType, c.latitude, c.longitude, c.radius, c.cleared_at AS observedAt, c.expires_at AS expiresAt, b.geometry AS boundaryJson FROM recent_clearances c LEFT JOIN place_boundaries b ON b.place_id=c.place_id WHERE c.expires_at>? ORDER BY c.cleared_at DESC').all(Date.now())
+    .map(({ boundaryJson, ...clearance }) => ({ ...clearance, boundary: boundaryJson ? JSON.parse(boundaryJson) : null }));
   function broadcast() {
     if (closed) return;
-    const data = `data: ${JSON.stringify({ online: onlineCount(), alerts: alerts(), feedStatus })}\n\n`;
+    const data = `data: ${JSON.stringify({ online: onlineCount(), alerts: alerts(), clearances: clearances(), feedStatus })}\n\n`;
     for (const [res] of clients) res.write(data);
   }
+  let clearanceTimer;
+  function scheduleClearanceExpiry() {
+    clearTimeout(clearanceTimer);
+    const next = db.prepare('SELECT min(expires_at) AS time FROM recent_clearances WHERE expires_at>?').get(Date.now()).time;
+    if (next === null) return;
+    clearanceTimer = setTimeout(() => {
+      db.prepare('DELETE FROM recent_clearances WHERE expires_at<=?').run(Date.now());
+      broadcast();
+      scheduleClearanceExpiry();
+    }, Math.max(1, next - Date.now()));
+    clearanceTimer.unref();
+  }
+  scheduleClearanceExpiry();
   const pendingBoundaries = new Set();
   let boundaryQueue = Promise.resolve();
   let nextBoundaryRequestAt = 0;
@@ -137,7 +154,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
       if (encoded !== previous) broadcast();
     }).catch(error => console.error(`Ошибка обработки контура: ${error.message}`)).finally(() => pendingBoundaries.delete(place.id));
   }
-  for (const place of db.prepare('SELECT DISTINCT place_id AS id, place_name AS name, latitude, longitude, radius, region_code AS region, area_type AS areaType FROM alerts WHERE expires_at>?').all(Date.now())) scheduleBoundary(place);
+  for (const place of db.prepare("SELECT DISTINCT place_id AS id, place_name AS name, latitude, longitude, radius, region_code AS region, area_type AS areaType FROM alerts WHERE expires_at>? AND area_type!='settlement'").all(Date.now())) scheduleBoundary(place);
   function setFeedStatus(status) {
     if (!['off', 'connecting', 'connected', 'error'].includes(status)) return;
     if (status === feedStatus) return;
@@ -149,10 +166,20 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     const observedAt = Number(date);
     if (!['radar_moscoww', 'radarrussiia'].includes(source) || !/^\d+$/.test(messageId) || !Number.isFinite(observedAt) || observedAt > Date.now() + 60_000) return;
     const parsed = parsePost(text, places);
-    db.prepare('DELETE FROM alerts WHERE message_id GLOB ?').run(`${source}:${messageId}:*`);
+    if (parsed.kind !== 'clear') db.prepare('DELETE FROM alerts WHERE message_id GLOB ?').run(`${source}:${messageId}:*`);
     if (parsed.kind === 'clear') {
       const scopes = parsed.places.length ? parsed.places.map(place => place.areaType === 'region' ? `region:${place.region}` : String(place.id)) : parsed.regions.length ? parsed.regions.map(code => `region:${code}`) : ['*'];
       for (const scope of scopes) db.prepare('INSERT INTO alert_clearances (place_id,cleared_at) VALUES (?,?) ON CONFLICT(place_id) DO UPDATE SET cleared_at=max(cleared_at,excluded.cleared_at)').run(`${source}:${scope}`, observedAt);
+      const affected = parsed.places.length
+        ? db.prepare('SELECT * FROM alerts WHERE message_id GLOB ? AND observed_at<=?').all(`${source}:*`, observedAt).filter(alert => parsed.places.some(place => place.areaType === 'region' ? alert.region_code === place.region : alert.place_id === place.id))
+        : parsed.regions.length
+          ? db.prepare('SELECT * FROM alerts WHERE message_id GLOB ? AND observed_at<=?').all(`${source}:*`, observedAt).filter(alert => parsed.regions.includes(alert.region_code))
+          : db.prepare('SELECT * FROM alerts WHERE message_id GLOB ? AND observed_at<=?').all(`${source}:*`, observedAt);
+      db.prepare('DELETE FROM alerts WHERE message_id GLOB ?').run(`${source}:${messageId}:*`);
+      if (observedAt + 5 * 60_000 > Date.now()) for (const alert of affected) {
+        db.prepare('INSERT INTO recent_clearances (source,place_id,place_name,latitude,longitude,radius,region_code,area_type,cleared_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(source,place_id) DO UPDATE SET place_name=excluded.place_name,latitude=excluded.latitude,longitude=excluded.longitude,radius=excluded.radius,region_code=excluded.region_code,area_type=excluded.area_type,cleared_at=max(cleared_at,excluded.cleared_at),expires_at=max(expires_at,excluded.expires_at)')
+          .run(source, alert.place_id, alert.place_name, alert.latitude, alert.longitude, alert.radius, alert.region_code, alert.area_type, observedAt, observedAt + 5 * 60_000);
+      }
       if (parsed.places.length) for (const place of parsed.places) {
         if (place.areaType === 'region') db.prepare('DELETE FROM alerts WHERE message_id GLOB ? AND region_code=? AND observed_at<=?').run(`${source}:*`, place.region, observedAt);
         else db.prepare('DELETE FROM alerts WHERE message_id GLOB ? AND place_id=? AND observed_at<=?').run(`${source}:*`, place.id, observedAt);
@@ -164,10 +191,12 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
         const cleared = db.prepare('SELECT max(cleared_at) AS time FROM alert_clearances WHERE place_id IN (?,?,?)').get(`${source}:*`, `${source}:${place.id}`, `${source}:region:${place.region}`).time;
         if (cleared === null || observedAt > cleared) {
           db.prepare('INSERT INTO alerts (message_id,place_id,place_name,latitude,longitude,radius,observed_at,expires_at,region_code,area_type) VALUES (?,?,?,?,?,?,?,?,?,?)').run(`${source}:${messageId}:${place.id}`, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt), place.region, place.areaType);
-          scheduleBoundary(place);
+          db.prepare('DELETE FROM recent_clearances WHERE source=? AND place_id=? AND cleared_at<?').run(source, place.id, observedAt);
+          if (place.areaType !== 'settlement') scheduleBoundary(place);
         }
       }
     }
+    scheduleClearanceExpiry();
     broadcast();
   }
   app.get('/api/events', auth, (req, res) => {
@@ -211,7 +240,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     resetTimer.unref();
   }
   scheduleReset();
-  return { app, applyPost, setFeedStatus, close() { closed = true; clearInterval(timer); clearTimeout(resetTimer); for (const [res] of clients) res.end(); db.close(); } };
+  return { app, applyPost, setFeedStatus, close() { closed = true; clearInterval(timer); clearTimeout(resetTimer); clearTimeout(clearanceTimer); for (const [res] of clients) res.end(); db.close(); } };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

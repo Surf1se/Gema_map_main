@@ -28,7 +28,7 @@ test('Yandex tiles use Web Mercator and display the required logo', { timeout: 3
   assert.equal(await page.locator('#yandex-logo').getAttribute('href'), 'https://yandex.ru/maps/');
 });
 
-test('new alerts show dismissible toasts and change from red or blue to yellow after 30 minutes', { timeout: 30_000 }, async t => {
+test('territory and settlement colors age independently; clearances turn green briefly', { timeout: 30_000 }, async t => {
   const polygon = { type: 'Polygon', coordinates: [[[37.1, 55.3], [38.5, 55.3], [38.5, 56], [37.1, 56], [37.1, 55.3]]] };
   const instance = createApp({ database: ':memory:', secureCookies: false, boundaryLookup: async () => polygon });
   instance.applyPost({ id: 301, date: Date.now(), text: 'Московская область\nОпасность по БПЛА' });
@@ -50,8 +50,9 @@ test('new alerts show dismissible toasts and change from red or blue to yellow a
   instance.applyPost({ id: 302, date: Date.now(), text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
   const cityPath = page.locator('.leaflet-alert-settlement-pane path').first();
   await cityPath.waitFor();
-  assert.equal(await cityPath.getAttribute('fill'), '#168bd0');
-  assert.equal(await cityPath.getAttribute('stroke'), '#59636b');
+  assert.equal(await cityPath.getAttribute('fill'), '#ed3030');
+  assert.equal(await cityPath.getAttribute('stroke'), '#ffffff');
+  assert.match(await cityPath.getAttribute('d'), /a/i);
   await page.locator('.alert-toast').waitFor();
   assert.match(await page.locator('.alert-toast').textContent(), /Раменское/);
   const toastBox = await page.locator('.alert-toast').boundingBox();
@@ -63,12 +64,21 @@ test('new alerts show dismissible toasts and change from red or blue to yellow a
   await page.locator('.alert-toast').waitFor();
   await page.clock.fastForward(120_001);
   assert.equal(await page.locator('.alert-toast').count(), 0);
-  await page.clock.fastForward(28 * 60_000 + 5_000);
-  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-region-pane path, .leaflet-alert-settlement-pane path')].every(path => path.getAttribute('fill') === '#f4cc40'));
+  await page.clock.fastForward(58 * 60_000 + 5_000);
+  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-region-pane path')].every(path => path.getAttribute('fill') === '#9299a0'));
+  assert.ok((await page.locator('.leaflet-alert-settlement-pane path').all()).every(Boolean));
+  assert.equal(await cityPath.getAttribute('fill'), '#ed3030');
+  await page.clock.fastForward(3 * 60 * 60_000 + 5_000);
+  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].every(path => path.getAttribute('fill') === '#f18b25'));
   await page.clock.setSystemTime(new Date());
   instance.applyPost({ id: 302, date: Date.now(), text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
-  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].some(path => path.getAttribute('fill') === '#168bd0'));
+  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].some(path => path.getAttribute('fill') === '#ed3030'));
   assert.equal(await page.locator('.alert-toast').count(), 0);
+  instance.applyPost({ id: 304, date: Date.now(), text: 'МО Раменское\nМосковская область\nОтбой' });
+  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].some(path => path.getAttribute('fill') === '#2baa62'));
+  await page.clock.fastForward(5 * 60_000 + 10);
+  await page.waitForFunction(() => document.querySelectorAll('.leaflet-alert-settlement-pane path').length === 1);
+  await page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].every(path => path.getAttribute('fill') !== '#2baa62'));
 });
 
 test('map stays visible while online count follows users on desktop and mobile', { timeout: 60_000 }, async t => {
@@ -112,7 +122,7 @@ test('map stays visible while online count follows users on desktop and mobile',
   instance.applyPost({ id: 123, date: Date.now(), text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
   await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('1'));
   assert.equal(await alice.page.locator('#active-circles-count').textContent(), '1');
-  await alice.page.waitForFunction(() => [...document.querySelectorAll('#map path.leaflet-interactive')].some(path => !path.getAttribute('d').includes('a')));
+  await alice.page.locator('.leaflet-alert-settlement-pane path').waitFor();
   await bob.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '1');
   await bob.page.locator('.alert-toast').waitFor();
   const [mobileHeader, mobileToast] = await Promise.all([bob.page.locator('.map-heading').boundingBox(), bob.page.locator('.alert-toast').boundingBox()]);
@@ -122,10 +132,10 @@ test('map stays visible while online count follows users on desktop and mobile',
   await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('0'));
   assert.equal(await alice.page.locator('#active-circles-count').textContent(), '0');
   await bob.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '0');
-  assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 0);
+  await alice.page.waitForFunction(() => [...document.querySelectorAll('.leaflet-alert-settlement-pane path')].every(path => path.getAttribute('fill') === '#2baa62'));
   instance.applyPost({ source: 'radarrussiia', id: 125, date: Date.now(), text: 'Геленджик\nКраснодарский край\nОпасность по БПЛА' });
   await alice.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '1');
-  await alice.page.locator('#map path.leaflet-interactive').dispatchEvent('click');
+  await alice.page.locator('.leaflet-alert-settlement-pane path[fill="#ed3030"]').dispatchEvent('click');
   assert.equal(await alice.page.locator('.leaflet-popup-content a').getAttribute('href'), 'https://t.me/radarrussiia/125');
   instance.applyPost({ source: 'radarrussiia', id: 126, date: Date.now() + 1, text: 'Краснодарский край\nОтбой опасности по БПЛА' });
   await alice.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '0');
