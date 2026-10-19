@@ -12,6 +12,13 @@ let mode = 'register';
 let events = null;
 let alertFit = false;
 const alertCircles = new Map();
+let demoActive = new URLSearchParams(location.search).get('demo') === '1';
+let lastAlerts = [];
+let lastFeedStatus = 'off';
+const demoAlerts = [
+  { placeId: 502965, place: 'Раменское', latitude: 55.56341, longitude: 38.24152, radius: 5000, demo: true },
+  { placeId: 571557, place: 'Бронницы', latitude: 55.42112, longitude: 38.26188, radius: 5000, demo: true }
+];
 const initials = name => [...name.trim()].slice(0, 2).join('').toUpperCase();
 function notice(message = '') { $('notice').textContent = message; $('notice').hidden = !message; }
 
@@ -28,9 +35,13 @@ function renderAlerts(alerts) {
     circle.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
     const popup = document.createElement('div');
     const title = document.createElement('strong'); title.textContent = `Опасность: ${alert.place}`;
-    const note = document.createElement('p'); note.textContent = 'Условный круг по сообщению канала. Это не точная зона опасности.';
-    const source = document.createElement('a'); source.href = `https://t.me/radar_moscoww/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
-    popup.append(title, note, source); circle.bindPopup(popup);
+    const note = document.createElement('p'); note.textContent = alert.demo ? 'Демо-пример. Реальной опасности по этому месту не подтверждает.' : 'Условный круг по сообщению канала. Это не точная зона опасности.';
+    popup.append(title, note);
+    if (!alert.demo) {
+      const source = document.createElement('a'); source.href = `https://t.me/radar_moscoww/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
+      popup.append(source);
+    }
+    circle.bindPopup(popup);
   }
   $('alerts-count').textContent = `Областей опасности: ${latest.size}`;
   if (!latest.size) alertFit = false;
@@ -39,6 +50,19 @@ function renderAlerts(alerts) {
     alertFit = true;
   }
 }
+
+function renderFeed() {
+  renderAlerts(demoActive ? demoAlerts : lastAlerts);
+  $('feed-status').textContent = demoActive ? 'Демо: примеры, не реальные предупреждения' : ({ off: 'Канал не подключён', connecting: 'Соединяемся с каналом…', connected: 'Канал подключён', error: 'Ошибка канала' })[lastFeedStatus] || 'Канал не подключён';
+  $('demo-clear').hidden = !demoActive;
+}
+$('demo-clear').onclick = () => {
+  demoActive = false;
+  const url = new URL(location.href);
+  url.searchParams.delete('demo');
+  history.replaceState(null, '', url);
+  renderFeed();
+};
 
 async function api(path, data) {
   let response;
@@ -98,8 +122,9 @@ function connect() {
   events.onmessage = event => {
     const data = JSON.parse(event.data);
     $('online-count').textContent = data.online;
-    renderAlerts(data.alerts || []);
-    $('feed-status').textContent = ({ off: 'Канал не подключён', connecting: 'Соединяемся с каналом…', connected: 'Канал подключён', error: 'Ошибка канала' })[data.feedStatus] || 'Канал не подключён';
+    lastAlerts = data.alerts || [];
+    lastFeedStatus = data.feedStatus;
+    renderFeed();
   };
   events.onerror = async () => {
     $('connection').textContent = 'Переподключение…';
