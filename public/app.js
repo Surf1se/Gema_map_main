@@ -52,11 +52,12 @@ function renderAlerts(alerts) {
     if (kind === 'circle') entry.layer.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
     const popup = document.createElement('div');
     const title = document.createElement('strong'); title.textContent = `Опасность: ${alert.place}`;
-    const note = document.createElement('p'); note.textContent = kind === 'boundary' ? 'Контур населённого пункта по данным OpenStreetMap. Это не зона опасности.' : 'Условный круг по сообщению канала. Это не точная зона опасности.';
+    const territory = alert.areaType === 'region' ? 'региона' : alert.areaType === 'district' ? 'района' : 'населённого пункта';
+    const note = document.createElement('p'); note.textContent = kind === 'boundary' ? `Контур ${territory} по данным OpenStreetMap. Это не зона опасности.` : `Примерный круг ${territory}: точный контур не найден. Это не зона опасности.`;
     const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
     popup.append(title, note, source); entry.layer.bindPopup(popup);
   }
-  $('alerts-count').textContent = `Областей опасности: ${latest.size}`;
+  $('alerts-count').textContent = `Территорий с опасностью: ${latest.size}`;
   $('active-circles-count').textContent = latest.size;
   if (!latest.size) alertFit = false;
   else if (!alertFit) {

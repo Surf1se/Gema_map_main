@@ -101,6 +101,28 @@ test('danger, edits and clear messages update the map feed', async t => {
   assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
 });
 
+test('district and region warnings clear at the intended scope', async t => {
+  const env = await start(); t.after(() => env.close()); const request = client(env.url);
+  await request('/register', account());
+  const reader = (await request('/events')).body.getReader(); t.after(() => reader.cancel().catch(() => {}));
+  await nextCount(reader, 1);
+  const date = Date.now();
+  env.applyPost({ id: 201, date, text: 'Знаменский район\nОрловская область\nОпасность по БПЛА' });
+  assert.match(await nextCount(reader, 1), /"areaType":"district"/);
+  env.applyPost({ id: 202, date: date + 1, text: 'Орловская область\nОпасность по БПЛА' });
+  const both = await nextCount(reader, 1);
+  assert.match(both, /"areaType":"region"/);
+  assert.match(both, /"areaType":"district"/);
+  env.applyPost({ id: 203, date: date + 2, text: 'Знаменский район\nОрловская область\nОтбой' });
+  const districtClear = await nextCount(reader, 1);
+  assert.match(districtClear, /"areaType":"region"/);
+  assert.doesNotMatch(districtClear, /"areaType":"district"/);
+  env.applyPost({ id: 204, date: date + 3, text: 'Орловская область\nОтбой' });
+  assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
+  env.applyPost({ id: 202, date: date + 1, text: 'Орловская область\nОпасность по БПЛА' });
+  assert.match(await nextCount(reader, 1), /"alerts":\[\]/);
+});
+
 test('channels use separate message IDs and region clearances', async t => {
   const env = await start(); t.after(() => env.close()); const request = client(env.url);
   await request('/register', account());

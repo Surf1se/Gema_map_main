@@ -11,14 +11,27 @@ test('explicit danger identifies the intended settlement, not a similarly named 
   assert.equal(parsePost('ГО Бронницы\nМосковская область\nРакетная опасность', places).place.name, 'Бронницы');
 });
 
-test('news, predictions and region-only warnings do not create city circles', () => {
+test('news and predictions do not create warnings', () => {
   for (const text of [
     'МО Раменское\nСбитие БПЛА',
     'МО Раменское\nПрогноз ракетной опасности на ночь',
-    'Московская область\nОпасность по БПЛА',
     'МО Раменское\nОпасности по БПЛА нет',
     'Раменское\nВозможная опасность по БПЛА'
   ]) assert.equal(parsePost(text, places).kind, 'ignore', text);
+});
+
+test('regions and districts are recognized without confusing them with settlements', () => {
+  const region = parsePost('Московская область\nОпасность по БПЛА', places);
+  assert.equal(region.kind, 'danger');
+  assert.equal(region.place.areaType, 'region');
+  assert.equal(region.place.region, '47');
+  const district = parsePost('Знаменский район\nОрловская область\nОпасность по БПЛА', places);
+  assert.equal(district.kind, 'danger');
+  assert.equal(district.place.areaType, 'district');
+  assert.equal(district.place.region, '56');
+  assert.equal(parsePost('Знаменский район\nОпасность по БПЛА', places).kind, 'ignore');
+  assert.deepEqual(parsePost('МО Раменское\nМосковская область\nОпасность по БПЛА', places).places.map(place => place.areaType), ['settlement']);
+  assert.deepEqual(parsePost('Знаменский район\nОрловская область\nОпасность по БПЛА', places).places.map(place => place.areaType), ['district']);
 });
 
 test('clear message may target a town or all current warnings', () => {
@@ -37,7 +50,7 @@ test('second channel formats identify cities and scoped clearances', () => {
   assert.deepEqual(parsePost('Краснодарский край\nРеспублика Адыгея\nОтбой опасности по БПЛА', places).regions, ['38', '01']);
   assert.equal(parsePost('Пыскор и близлежащие, Пермский край - опасность по БПЛА и в направлении Березники.', places).place?.name, 'Пыскор');
   assert.equal(parsePost('Геленджик\nКраснодарский край\nТревога по БПЛА', places).kind, 'danger');
-  assert.equal(parsePost('Краснодарский край\nОпасность по БПЛА', places).kind, 'ignore');
+  assert.equal(parsePost('Краснодарский край\nОпасность по БПЛА', places).place.areaType, 'region');
   assert.equal(parsePost('За ночь сбито 149 БПЛА над Кубанью', places).kind, 'ignore');
   assert.equal(parsePost('Знаменский район\nОрловская область\nФиксация БПЛА', places).kind, 'ignore');
 });
@@ -46,7 +59,7 @@ test('misspelled danger and clearance still require a named settlement', () => {
   assert.equal(parsePost('Геленджик\nКраснодарский край\nОпастность по БПЛА', places).place?.name, 'Геленджик');
   assert.equal(parsePost('Раменское - ракетная опастность', places).kind, 'danger');
   assert.equal(parsePost('Геленджик\nКраснодарский край\nОтбой опастности по БПЛА', places).kind, 'clear');
-  assert.equal(parsePost('Краснодарский край\nОпастность по БПЛА', places).kind, 'ignore');
+  assert.equal(parsePost('Краснодарский край\nОпастность по БПЛА', places).place.areaType, 'region');
 });
 
 test('warning expires at the next 08:00 Moscow time', () => {
