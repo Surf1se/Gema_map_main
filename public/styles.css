@@ -20,9 +20,14 @@ button:focus-visible,a:focus-visible{outline:3px solid #75b5ff;outline-offset:3p
 .eyebrow{font-size:9px;font-weight:600;letter-spacing:1.8px;color:#9bada7}
 h1{font-size:28px;font-weight:500;line-height:1.3;letter-spacing:-1px;margin:16px 0 12px}
 .sidebar-intro p{font-size:12px;color:var(--muted);line-height:1.8;margin:0;max-width:250px}
-.online-card{margin-top:26px;padding:24px;border:1px solid #36534a;border-radius:16px;background:#203a35}
-.online-count{font-size:72px;line-height:1.1;letter-spacing:-4px;color:var(--mint);font-weight:650;margin:14px 0 2px}
-.online-card p{font-size:12px;color:#bdd0c3;margin:0}
+.online-card{margin-top:26px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.stat-card{min-width:0;display:flex;flex-direction:column;padding:15px 14px 13px;border:1px solid #36534a;border-radius:12px;background:#203a35}
+.stat-card .eyebrow{min-height:26px;line-height:1.35;letter-spacing:1.1px;color:#a7bdb0}
+.stat-value{font-size:42px;line-height:1.15;letter-spacing:-2px;color:var(--mint);font-weight:650;margin:7px 0 4px}
+.stat-card p{font-size:10px;color:#bdd0c3;margin:0}
+.alert-card{background:#3b2f32;border-color:#704649}
+.alert-card .eyebrow{color:#e1b6b3}
+.alert-card .stat-value{color:#ffaca6}
 .profile{display:flex;align-items:center;gap:10px;margin-top:auto;padding:20px 0;border-top:1px solid #2a3f3b}
 .profile strong{display:block;font-size:12px;font-weight:500;word-break:break-word}
 .profile small{display:block;font-size:9px;color:#8da49d;margin-top:4px}
@@ -62,6 +67,6 @@ input::placeholder{color:#a0aa9d}
 .form-error{font-size:11px;color:#ad402c;line-height:1.6;min-height:0;margin:10px 0}
 .auth-footnote{font-size:9px;color:#849080;line-height:1.7;margin:15px 0 0}
 noscript{position:fixed;z-index:1000;background:white;color:black;padding:20px}
-@media(max-width:900px){.sidebar{width:280px;padding:24px 18px 0}.sidebar-intro h1{font-size:25px}.online-count{font-size:60px}.map-header{left:14px;right:14px;top:14px}.map-heading #connection,.map-heading .divider:last-of-type{display:none}}
-@media(max-width:650px){body{flex-direction:column}.sidebar{display:grid;grid-template-columns:1fr auto;width:100%;padding:12px 16px;gap:10px;order:2}.brand{font-size:23px;grid-column:1}.brand-icon{width:27px;height:29px;border-radius:9px;font-size:25px}.workspace-label,.nav-selected,.sidebar-intro{display:none}.profile{grid-column:2;grid-row:1;margin:0;padding:0;border:0}.profile .avatar{display:none}.profile small{font-size:9px}.online-card{grid-column:1 / -1;grid-row:2;margin:0;padding:10px 16px;display:flex;align-items:center;gap:12px}.online-card .eyebrow{max-width:85px;line-height:1.4}.online-count{font-size:42px;letter-spacing:-2px;margin:0}.online-card p{font-size:10px}.map-shell{order:1;margin:0;border-radius:0;min-height:0}.map-bottom{bottom:20px;left:12px;right:12px;font-size:8px;padding:8px}.map-heading{gap:9px;padding:13px}.map-heading strong{font-size:11px}.notice{top:75px;left:14px;font-size:11px}.leaflet-bottom.leaflet-right{bottom:32px;right:4px}dialog{padding:24px}.dialog-brand{margin-bottom:18px}dialog h2{font-size:24px}}
+@media(max-width:900px){.sidebar{width:280px;padding:24px 18px 0}.sidebar-intro h1{font-size:25px}.stat-card{padding:13px 11px}.stat-value{font-size:36px}.map-header{left:14px;right:14px;top:14px}.map-heading #connection,.map-heading .divider:last-of-type{display:none}}
+@media(max-width:650px){body{flex-direction:column}.sidebar{display:grid;grid-template-columns:1fr auto;width:100%;padding:12px 16px;gap:10px;order:2}.brand{font-size:23px;grid-column:1}.brand-icon{width:27px;height:29px;border-radius:9px;font-size:25px}.workspace-label,.nav-selected,.sidebar-intro{display:none}.profile{grid-column:2;grid-row:1;margin:0;padding:0;border:0}.profile .avatar{display:none}.profile small{font-size:9px}.online-card{grid-column:1 / -1;grid-row:2;margin:0}.stat-card{padding:10px 13px}.stat-card .eyebrow{min-height:0}.stat-value{font-size:32px;margin:2px 0}.map-shell{order:1;margin:0;border-radius:0;min-height:0}.map-bottom{bottom:20px;left:12px;right:12px;font-size:8px;padding:8px}.map-heading{gap:9px;padding:13px}.map-heading strong{font-size:11px}.notice{top:75px;left:14px;font-size:11px}.leaflet-bottom.leaflet-right{bottom:32px;right:4px}dialog{padding:24px}.dialog-brand{margin-bottom:18px}dialog h2{font-size:24px}}
 @media(max-width:650px){.map-heading strong,.map-heading .divider{display:none}}

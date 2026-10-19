@@ -12,7 +12,10 @@
     <div class="workspace-label">ОБЩЕЕ ПРОСТРАНСТВО</div>
     <div class="nav-selected"><span>◈</span> Общая карта <span class="live-dot"></span></div>
     <div class="sidebar-intro"><span class="eyebrow">GEMA MAP</span><h1>Предупреждения<br>на карте.</h1><p>Условные круги показывают населённые пункты, для которых канал сообщил об опасности.</p></div>
-    <div class="online-card"><span class="eyebrow">СЕЙЧАС НА ПЛАТФОРМЕ</span><div id="online-count" class="online-count" aria-live="polite">0</div><p>пользователей онлайн</p></div>
+    <div class="online-card" aria-label="Показатели платформы">
+      <div class="stat-card"><span class="eyebrow">СЕЙЧАС ОНЛАЙН</span><div id="online-count" class="stat-value" aria-live="polite">0</div><p>пользователей</p></div>
+      <div class="stat-card alert-card"><span class="eyebrow">АКТИВНЫЕ КРУГИ</span><div id="active-circles-count" class="stat-value" aria-live="polite">0</div><p>области на карте</p></div>
+    </div>
     <div class="profile"><span class="avatar" id="profile-avatar">?</span><div><strong id="profile-name">Гость</strong><small id="profile-status">Войдите, чтобы присоединиться</small></div><button id="logout" class="icon-button" title="Выйти" aria-label="Выйти" hidden>↪</button></div>
   </aside>
   <main class="map-shell">

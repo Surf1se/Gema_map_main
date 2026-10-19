@@ -32,15 +32,23 @@ test('map stays visible while online count follows users on desktop and mobile',
   for (const { page } of [alice, bob]) {
     await page.waitForFunction(() => document.querySelector('#online-count').textContent === '2');
     assert.equal(await page.locator('#map .leaflet-pane').count() > 0, true);
+    assert.equal(await page.locator('.stat-card').count(), 2);
+    assert.equal(await page.locator('#active-circles-count').textContent(), '0');
     assert.equal(await page.locator('.map-pin').count(), 0);
     assert.doesNotMatch(await page.locator('.online-card').textContent(), /Алиса|Боб|@/);
   }
   instance.applyPost({ id: 123, date: Date.now(), text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
   await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('1'));
+  assert.equal(await alice.page.locator('#active-circles-count').textContent(), '1');
+  await bob.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '1');
   assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 1);
   instance.applyPost({ id: 124, date: Date.now(), text: 'Московская область\nОтбой опасности по БПЛА' });
   await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('0'));
+  assert.equal(await alice.page.locator('#active-circles-count').textContent(), '0');
+  await bob.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '0');
   assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 0);
+  const [onlineCard, alertCard] = await Promise.all([bob.page.locator('.stat-card').first().boundingBox(), bob.page.locator('.stat-card').last().boundingBox()]);
+  assert.equal(alertCard.x > onlineCard.x, true);
   assert.equal(await bob.page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   const secondTab = await alice.context.newPage(); await secondTab.goto(url);
   await secondTab.waitForFunction(() => document.querySelector('#online-count').textContent === '2');

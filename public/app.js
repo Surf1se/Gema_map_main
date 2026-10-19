@@ -33,6 +33,7 @@ function renderAlerts(alerts) {
     popup.append(title, note, source); circle.bindPopup(popup);
   }
   $('alerts-count').textContent = `Областей опасности: ${latest.size}`;
+  $('active-circles-count').textContent = latest.size;
   if (!latest.size) alertFit = false;
   else if (!alertFit) {
     map.fitBounds(L.featureGroup([...alertCircles.values()]).getBounds(), { maxZoom: 9, padding: [40, 40] });
