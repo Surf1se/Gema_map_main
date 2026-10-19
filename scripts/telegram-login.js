@@ -23,7 +23,10 @@ try {
     password: () => rl.question('Пароль двухэтапной проверки, если запрошен: '),
     emailAddress: () => rl.question('Email для входа, если запрошен: '),
     emailVerification: async () => ({ type: 'code', code: await rl.question('Код из email: ') }),
-    onError: error => console.error(`Ошибка входа: ${error.message}`)
+    onError: error => {
+      console.error(`Ошибка входа: ${error.message}`);
+      return error.message === 'readline was closed' || error.message === 'Aborted with Ctrl+C';
+    }
   });
   mkdirSync(join(root, '.data'), { recursive: true });
   writeFileSync(sessionPath, client.session.save(), { mode: 0o600 });

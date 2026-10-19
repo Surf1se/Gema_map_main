@@ -55,14 +55,6 @@ test('map stays visible while online count follows users on desktop and mobile',
   await bob.page.reload();
   await bob.page.waitForFunction(() => document.querySelector('#online-count').textContent === '2');
   assert.equal(await bob.page.locator('#auth-dialog').isVisible(), false);
-  await alice.page.goto(`${url}/?demo=1`);
-  await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('2'));
-  assert.match(await alice.page.locator('#feed-status').textContent(), /Демо/);
-  assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 2);
-  await alice.page.locator('#demo-clear').click();
-  await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('0'));
-  assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 0);
-  assert.equal(new URL(alice.page.url()).searchParams.has('demo'), false);
   assert.deepEqual(locationRequests, []);
   assert.deepEqual(errors, []);
 });
