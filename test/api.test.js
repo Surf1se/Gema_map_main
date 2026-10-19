@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createApp } from '../server.js';
 
-async function start(database = ':memory:') {
-  const instance = createApp({ database, secureCookies: false });
+async function start(database = ':memory:', options = {}) {
+  const instance = createApp({ database, secureCookies: false, boundaryLookup: async () => null, ...options });
   const server = instance.app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   return { url: `http://127.0.0.1:${server.address().port}`, applyPost: instance.applyPost, async close() { instance.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };

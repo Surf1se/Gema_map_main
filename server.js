@@ -6,6 +6,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPlaceIndex, nextMoscowReset, parsePost } from './lib/alerts.js';
+import { lookupBoundary } from './lib/boundaries.js';
 
 const scrypt = promisify(scryptCallback);
 const root = dirname(fileURLToPath(import.meta.url));
@@ -13,14 +14,15 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const lifetime = 7 * 24 * 60 * 60 * 1000;
 let cachedPlaces;
 
-export function createApp({ database = join(root, '.data', 'gema.sqlite'), secureCookies = process.env.NODE_ENV === 'production' } = {}) {
+export function createApp({ database = join(root, '.data', 'gema.sqlite'), secureCookies = process.env.NODE_ENV === 'production', boundaryLookup = lookupBoundary } = {}) {
   if (database !== ':memory:') mkdirSync(dirname(database), { recursive: true });
   const db = new DatabaseSync(database);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
     CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, created_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS alerts (message_id TEXT PRIMARY KEY, place_id INTEGER NOT NULL, place_name TEXT NOT NULL, latitude REAL NOT NULL, longitude REAL NOT NULL, radius INTEGER NOT NULL, observed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, region_code TEXT);
-    CREATE TABLE IF NOT EXISTS alert_clearances (place_id TEXT PRIMARY KEY, cleared_at INTEGER NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS alert_clearances (place_id TEXT PRIMARY KEY, cleared_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS place_boundaries (place_id INTEGER PRIMARY KEY, geometry TEXT, retry_after INTEGER NOT NULL);`);
   db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
   const places = cachedPlaces ||= loadPlaceIndex();
   if (!db.prepare('PRAGMA table_info(alerts)').all().some(column => column.name === 'region_code')) db.exec('ALTER TABLE alerts ADD COLUMN region_code TEXT');
@@ -99,13 +101,41 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   });
   app.get('/api/me', auth, (req, res) => res.json({ user: { id: req.user.id, name: req.user.name } }));
   const onlineCount = () => new Set([...clients.values()].map(client => client.userId)).size;
-  const alerts = () => db.prepare('SELECT message_id AS messageKey, place_id AS placeId, place_name AS place, latitude, longitude, radius, observed_at AS observedAt FROM alerts WHERE expires_at>? ORDER BY observed_at DESC').all(Date.now())
-    .map(({ messageKey, ...alert }) => ({ ...alert, source: messageKey.split(':')[0], messageId: messageKey.split(':')[1] }));
+  const alerts = () => db.prepare('SELECT a.message_id AS messageKey, a.place_id AS placeId, a.place_name AS place, a.latitude, a.longitude, a.radius, a.observed_at AS observedAt, b.geometry AS boundaryJson FROM alerts a LEFT JOIN place_boundaries b ON b.place_id=a.place_id WHERE a.expires_at>? ORDER BY a.observed_at DESC').all(Date.now())
+    .map(({ messageKey, boundaryJson, ...alert }) => ({ ...alert, source: messageKey.split(':')[0], messageId: messageKey.split(':')[1], boundary: boundaryJson ? JSON.parse(boundaryJson) : null }));
   function broadcast() {
     if (closed) return;
     const data = `data: ${JSON.stringify({ online: onlineCount(), alerts: alerts(), feedStatus })}\n\n`;
     for (const [res] of clients) res.write(data);
   }
+  const pendingBoundaries = new Set();
+  let boundaryQueue = Promise.resolve();
+  let nextBoundaryRequestAt = 0;
+  function scheduleBoundary(place) {
+    const cached = db.prepare('SELECT retry_after FROM place_boundaries WHERE place_id=?').get(place.id);
+    if (cached?.retry_after > Date.now() || pendingBoundaries.has(place.id)) return;
+    pendingBoundaries.add(place.id);
+    boundaryQueue = boundaryQueue.then(async () => {
+      const wait = nextBoundaryRequestAt - Date.now();
+      if (wait > 0) await new Promise(resolve => setTimeout(resolve, wait));
+      if (closed) return;
+      nextBoundaryRequestAt = Date.now() + 1100;
+      let geometry = null;
+      let retryAfter = Date.now() + 7 * 86_400_000;
+      try { geometry = await boundaryLookup(place); }
+      catch (error) {
+        retryAfter = Date.now() + 10 * 60_000;
+        console.warn(`Не удалось получить контур для ${place.name}: ${error.message}`);
+      }
+      if (closed) return;
+      const previous = db.prepare('SELECT geometry FROM place_boundaries WHERE place_id=?').get(place.id)?.geometry || null;
+      const encoded = geometry ? JSON.stringify(geometry) : null;
+      db.prepare('INSERT INTO place_boundaries VALUES (?,?,?) ON CONFLICT(place_id) DO UPDATE SET geometry=excluded.geometry,retry_after=excluded.retry_after')
+        .run(place.id, encoded, retryAfter);
+      if (encoded !== previous) broadcast();
+    }).catch(error => console.error(`Ошибка обработки контура: ${error.message}`)).finally(() => pendingBoundaries.delete(place.id));
+  }
+  for (const place of db.prepare('SELECT DISTINCT place_id AS id, place_name AS name, latitude, longitude, radius FROM alerts WHERE expires_at>?').all(Date.now())) scheduleBoundary(place);
   function setFeedStatus(status) {
     if (!['off', 'connecting', 'connected', 'error'].includes(status)) return;
     if (status === feedStatus) return;
@@ -127,7 +157,10 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     } else if (parsed.kind === 'danger' && nextMoscowReset(observedAt) > Date.now()) {
       for (const place of parsed.places) {
         const cleared = db.prepare('SELECT max(cleared_at) AS time FROM alert_clearances WHERE place_id IN (?,?,?)').get(`${source}:*`, `${source}:${place.id}`, `${source}:region:${place.region}`).time;
-        if (cleared === null || observedAt > cleared) db.prepare('INSERT INTO alerts VALUES (?,?,?,?,?,?,?,?,?)').run(`${source}:${messageId}:${place.id}`, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt), place.region);
+        if (cleared === null || observedAt > cleared) {
+          db.prepare('INSERT INTO alerts VALUES (?,?,?,?,?,?,?,?,?)').run(`${source}:${messageId}:${place.id}`, place.id, place.name, place.latitude, place.longitude, place.radius, observedAt, nextMoscowReset(observedAt), place.region);
+          scheduleBoundary(place);
+        }
       }
     }
     broadcast();

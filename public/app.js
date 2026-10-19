@@ -13,32 +13,37 @@ let user = null;
 let mode = 'register';
 let events = null;
 let alertFit = false;
-const alertCircles = new Map();
+const alertLayers = new Map();
 const initials = name => [...name.trim()].slice(0, 2).join('').toUpperCase();
 function notice(message = '') { $('notice').textContent = message; $('notice').hidden = !message; }
 
 function renderAlerts(alerts) {
   const latest = new Map();
   for (const alert of alerts) if (!latest.has(alert.placeId)) latest.set(alert.placeId, alert);
-  for (const [id, circle] of alertCircles) if (!latest.has(id)) { circle.remove(); alertCircles.delete(id); }
+  for (const [id, entry] of alertLayers) if (!latest.has(id)) { entry.layer.remove(); alertLayers.delete(id); }
   for (const [id, alert] of latest) {
-    let circle = alertCircles.get(id);
-    if (!circle) {
-      circle = L.circle([alert.latitude, alert.longitude], { radius: alert.radius, color: '#ba2525', fillColor: '#e44444', fillOpacity: 0.35, weight: 2 }).addTo(map);
-      alertCircles.set(id, circle);
+    const kind = alert.boundary ? 'boundary' : 'circle';
+    let entry = alertLayers.get(id);
+    if (entry?.kind !== kind) {
+      entry?.layer.remove();
+      const style = { color: '#ba2525', fillColor: '#e44444', fillOpacity: 0.35, weight: 2 };
+      const layer = alert.boundary ? L.geoJSON(alert.boundary, { style }) : L.circle([alert.latitude, alert.longitude], { radius: alert.radius, ...style });
+      layer.addTo(map);
+      entry = { kind, layer };
+      alertLayers.set(id, entry);
     }
-    circle.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
+    if (kind === 'circle') entry.layer.setLatLng([alert.latitude, alert.longitude]).setRadius(alert.radius);
     const popup = document.createElement('div');
     const title = document.createElement('strong'); title.textContent = `Опасность: ${alert.place}`;
-    const note = document.createElement('p'); note.textContent = 'Условный круг по сообщению канала. Это не точная зона опасности.';
+    const note = document.createElement('p'); note.textContent = kind === 'boundary' ? 'Контур населённого пункта по данным OpenStreetMap. Это не зона опасности.' : 'Условный круг по сообщению канала. Это не точная зона опасности.';
     const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
-    popup.append(title, note, source); circle.bindPopup(popup);
+    popup.append(title, note, source); entry.layer.bindPopup(popup);
   }
   $('alerts-count').textContent = `Областей опасности: ${latest.size}`;
   $('active-circles-count').textContent = latest.size;
   if (!latest.size) alertFit = false;
   else if (!alertFit) {
-    map.fitBounds(L.featureGroup([...alertCircles.values()]).getBounds(), { maxZoom: 9, padding: [40, 40] });
+    map.fitBounds(L.featureGroup([...alertLayers.values()].map(entry => entry.layer)).getBounds(), { maxZoom: 9, padding: [40, 40] });
     alertFit = true;
   }
 }

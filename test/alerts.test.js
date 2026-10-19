@@ -42,6 +42,13 @@ test('second channel formats identify cities and scoped clearances', () => {
   assert.equal(parsePost('Знаменский район\nОрловская область\nФиксация БПЛА', places).kind, 'ignore');
 });
 
+test('misspelled danger and clearance still require a named settlement', () => {
+  assert.equal(parsePost('Геленджик\nКраснодарский край\nОпастность по БПЛА', places).place?.name, 'Геленджик');
+  assert.equal(parsePost('Раменское - ракетная опастность', places).kind, 'danger');
+  assert.equal(parsePost('Геленджик\nКраснодарский край\nОтбой опастности по БПЛА', places).kind, 'clear');
+  assert.equal(parsePost('Краснодарский край\nОпастность по БПЛА', places).kind, 'ignore');
+});
+
 test('warning expires at the next 08:00 Moscow time', () => {
   assert.equal(nextMoscowReset(Date.parse('2026-10-19T04:59:59Z')), Date.parse('2026-10-19T05:00:00Z'));
   assert.equal(nextMoscowReset(Date.parse('2026-10-19T05:00:00Z')), Date.parse('2026-10-20T05:00:00Z'));

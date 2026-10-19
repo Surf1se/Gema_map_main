@@ -6,7 +6,8 @@ import { chromium } from 'playwright';
 import { createApp } from '../server.js';
 
 test('map stays visible while online count follows users on desktop and mobile', { timeout: 60_000 }, async t => {
-  const instance = createApp({ database: ':memory:', secureCookies: false });
+  const polygon = { type: 'Polygon', coordinates: [[[38.17, 55.48], [38.35, 55.48], [38.35, 55.61], [38.17, 55.61], [38.17, 55.48]]] };
+  const instance = createApp({ database: ':memory:', secureCookies: false, boundaryLookup: async place => place.name === 'Раменское' ? polygon : null });
   const server = instance.app.listen(0, '127.0.0.1'); await once(server, 'listening');
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined), args: ['--no-sandbox'] });
   t.after(async () => { await browser.close(); instance.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
@@ -45,6 +46,7 @@ test('map stays visible while online count follows users on desktop and mobile',
   instance.applyPost({ id: 123, date: Date.now(), text: 'МО Раменское\nМосковская область\nОпасность по БПЛА' });
   await alice.page.waitForFunction(() => document.querySelector('#alerts-count').textContent.includes('1'));
   assert.equal(await alice.page.locator('#active-circles-count').textContent(), '1');
+  await alice.page.waitForFunction(() => [...document.querySelectorAll('#map path.leaflet-interactive')].some(path => !path.getAttribute('d').includes('a')));
   await bob.page.waitForFunction(() => document.querySelector('#active-circles-count').textContent === '1');
   assert.equal(await alice.page.locator('#map path.leaflet-interactive').count(), 1);
   instance.applyPost({ id: 124, date: Date.now(), text: 'Московская область\nОтбой опасности по БПЛА' });

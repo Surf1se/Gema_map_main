@@ -11,7 +11,7 @@
     "dev": "node --watch server.js",
     "telegram:login": "node scripts/telegram-login.js",
     "telegram:login:qr": "node scripts/telegram-login-qr.js",
-    "test": "node --test test/api.test.js test/alerts.test.js",
+    "test": "node --test test/api.test.js test/alerts.test.js test/boundaries.test.js",
     "test:browser": "node --test test/browser.test.js"
   },
   "dependencies": {
