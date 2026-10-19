@@ -4,6 +4,11 @@ import { loadPlaceIndex, parsePost } from '../lib/alerts.js';
 
 const places = loadPlaceIndex();
 
+test('Telegram watcher loads with the current alert timing rules', async () => {
+  const { startTelegramWatcher } = await import('../lib/telegram-watcher.js');
+  assert.equal(typeof startTelegramWatcher, 'function');
+});
+
 test('explicit danger identifies the intended settlement, not a similarly named village', () => {
   const result = parsePost('МО Раменское\nМосковская область\nОпасность по БПЛА\nМеры безопасности', places);
   assert.equal(result.kind, 'danger');
