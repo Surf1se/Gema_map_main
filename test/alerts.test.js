@@ -92,6 +92,11 @@ test('new radar trigger phrases are treated as danger signals', () => {
   }
 });
 
+test('launch messages and locative republic names resolve the marked region', () => {
+  assert.equal(parsePost('Пуски БПЛА из Республики Адыгея', places).place?.name, 'Республика Адыгея');
+  assert.equal(parsePost('Опасность по БПЛА в Республике Адыгея', places).place?.name, 'Республика Адыгея');
+});
+
 test('places named inside detection messages are resolved in Russian cases', () => {
   assert.equal(parsePost('Зафиксировали в Москве', places).place?.name, 'Москва');
   assert.equal(parsePost('Зафиксировали БПЛА в Раменском', places).place?.name, 'Раменское');
