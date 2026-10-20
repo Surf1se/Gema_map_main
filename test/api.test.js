@@ -69,7 +69,9 @@ test('online count tracks unique connected accounts without identity data', asyn
   const alice = client(env.url), bob = client(env.url), guest = client(env.url);
   await alice('/register', account());
   await bob('/register', { ...account('bob@example.com'), name: 'Боб' });
-  assert.equal((await guest('/events')).status, 401);
+  const guestEvents = await guest('/events');
+  assert.equal(guestEvents.status, 200);
+  await guestEvents.body.cancel();
   const aliceReader = (await alice('/events')).body.getReader(); t.after(() => aliceReader.cancel().catch(() => {}));
   assert.doesNotMatch(await nextCount(aliceReader, 1), /Алиса|Боб|email|password|token/);
   const secondTabReader = (await alice('/events')).body.getReader(); t.after(() => secondTabReader.cancel().catch(() => {}));

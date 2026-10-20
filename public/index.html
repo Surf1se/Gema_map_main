@@ -11,12 +11,12 @@
     <a class="brand" href="/" aria-label="Gema Map"><span class="brand-icon">g</span>gema<span class="brand-dot">•</span></a>
     <div class="workspace-label">ОБЩЕЕ ПРОСТРАНСТВО</div>
     <div class="nav-selected"><span>◈</span> Общая карта <span class="live-dot"></span></div>
-    <div class="sidebar-intro"><span class="eyebrow">GEMA MAP</span><h1>Предупреждения<br>на карте.</h1><p>Районы и регионы — красным, через 60 минут — серым. Населённые пункты остаются красными маркерами до отбоя; при наведении видно время публикации. После отбоя отметка остаётся зелёной 5 минут.</p></div>
+    <div class="sidebar-intro"><span class="eyebrow">GEMA MAP</span><h1>Предупреждения<br>на карте.</h1><p>События из Telegram отображаются на карте России. Данные обновляются в реальном времени.</p></div>
     <div class="online-card" aria-label="Показатели платформы">
-      <div class="stat-card"><span class="eyebrow">СЕЙЧАС ОНЛАЙН</span><div id="online-count" class="stat-value" aria-live="polite">0</div><p>пользователей</p></div>
-      <div class="stat-card alert-card"><span class="eyebrow">ТЕРРИТОРИИ С ОПАСНОСТЬЮ</span><div id="active-circles-count" class="stat-value" aria-live="polite">0</div><p>территории на карте</p></div>
+      <div class="stat-card"><span class="stat-icon" aria-hidden="true">●</span><div><span class="eyebrow">ОНЛАЙН</span><div id="online-count" class="stat-value" aria-live="polite">0</div></div></div>
+      <div class="stat-card alert-card"><span class="stat-icon" aria-hidden="true">!</span><div><span class="eyebrow">ОПАСНОСТИ</span><div id="active-circles-count" class="stat-value" aria-live="polite">0</div></div></div>
     </div>
-    <div class="profile"><span class="avatar" id="profile-avatar">?</span><div><strong id="profile-name">Гость</strong><small id="profile-status">Войдите, чтобы присоединиться</small></div><button id="logout" class="icon-button" title="Выйти" aria-label="Выйти" hidden>↪</button></div>
+    <section class="legend" aria-labelledby="legend-title"><span class="eyebrow" id="legend-title">ОБОЗНАЧЕНИЯ</span><div><i class="legend-swatch legend-swatch--red"></i>Активная область</div><div><i class="legend-swatch legend-swatch--gray"></i>Нет обновлений 30 минут</div><div><i class="legend-swatch legend-swatch--dot"></i>Населённый пункт</div><div><i class="legend-swatch legend-swatch--drone">➤</i>Подтверждённое направление</div><small>Отметки исчезают через 60 минут без нового сообщения. Зелёная отметка отбоя хранится 5 минут.</small></section>
   </aside>
   <main class="map-shell">
     <div id="map" aria-label="Карта"></div>
@@ -25,18 +25,6 @@
     <div id="alert-toasts" class="alert-toasts" aria-live="polite" aria-relevant="additions"></div>
     <div id="notice" role="status" class="notice" hidden></div>
   </main>
-  <dialog id="auth-dialog" aria-labelledby="auth-title">
-    <div class="dialog-brand"><span class="brand-icon">g</span> GEMA MAP</div><span class="eyebrow">ВАШ АККАУНТ GEMA</span>
-    <h2 id="auth-title">Добро пожаловать в Gema.</h2><p class="auth-description">Войдите, чтобы видеть, сколько пользователей сейчас на платформе.</p>
-    <div class="auth-tabs"><button id="register-tab" class="active" type="button">Регистрация</button><button id="login-tab" type="button">Вход</button></div>
-    <form id="auth-form">
-      <label id="name-label">Ваше имя<input id="name" name="name" autocomplete="nickname" minlength="2" maxlength="40" placeholder="Как к вам обращаться" required></label>
-      <label>Email<input id="email" name="email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com" required></label>
-      <label>Пароль<input id="password" name="password" type="password" autocomplete="new-password" minlength="10" maxlength="128" placeholder="Не менее 10 символов" required></label>
-      <p id="auth-error" class="form-error" role="alert"></p><button id="auth-submit" class="primary" type="submit">Создать аккаунт <span>↗</span></button>
-    </form>
-    <p class="auth-footnote">Счётчик показывает только количество пользователей онлайн.</p>
-  </dialog>
   <noscript>Для работы платформы включите JavaScript в браузере.</noscript>
 </body>
 </html>

@@ -115,7 +115,8 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     res.json({ user: issueSession(res, user) });
   });
   app.get('/api/me', auth, (req, res) => res.json({ user: { id: req.user.id, name: req.user.name } }));
-  const onlineCount = () => new Set([...clients.values()].map(client => client.userId)).size;
+  const onlineCount = () => new Set([...clients.values()].map(client => client.visitorId)).size;
+  const cookieValue = (req, name) => req.headers.cookie?.split(';').map(value => value.trim()).find(value => value.startsWith(`${name}=`))?.slice(name.length + 1);
   const alerts = () => db.prepare('SELECT a.message_id AS messageKey, a.place_id AS placeId, a.place_name AS place, a.area_type AS areaType, a.latitude, a.longitude, a.radius, a.observed_at AS observedAt, a.published_at AS publishedAt, a.direction_json AS directionJson, b.geometry AS boundaryJson FROM alerts a LEFT JOIN place_boundaries b ON b.place_id=a.place_id WHERE a.expires_at>? ORDER BY a.observed_at DESC').all(Date.now())
     .map(({ messageKey, boundaryJson, directionJson, ...alert }) => ({ ...alert, source: messageKey.split(':')[0], messageId: messageKey.split(':')[1], boundary: boundaryJson ? JSON.parse(boundaryJson) : null, direction: directionJson && alert.observedAt + 45 * 60_000 > Date.now() ? JSON.parse(directionJson) : null }));
   const clearances = () => db.prepare('SELECT c.place_id AS placeId, c.place_name AS place, c.area_type AS areaType, c.latitude, c.longitude, c.radius, c.cleared_at AS observedAt, c.published_at AS publishedAt, c.expires_at AS expiresAt, b.geometry AS boundaryJson FROM recent_clearances c LEFT JOIN place_boundaries b ON b.place_id=c.place_id WHERE c.expires_at>? ORDER BY c.cleared_at DESC').all(Date.now())
@@ -226,10 +227,12 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     scheduleClearanceExpiry();
     broadcast();
   }
-  app.get('/api/events', auth, (req, res) => {
+  app.get('/api/events', (req, res) => {
     res.set({ 'Content-Type': 'text/event-stream', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+    const visitorId = cookieValue(req, 'gema_visitor') || randomBytes(18).toString('hex');
+    if (!cookieValue(req, 'gema_visitor')) res.cookie('gema_visitor', visitorId, { httpOnly: true, sameSite: 'lax', secure: secureCookies, maxAge: lifetime, path: '/' });
     res.flushHeaders();
-    clients.set(res, { token: req.user.token, userId: req.user.id });
+    clients.set(res, { visitorId });
     broadcast();
     req.on('close', () => { if (clients.delete(res)) broadcast(); });
   });
@@ -250,10 +253,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
   const timer = setInterval(() => {
     let changed = false;
     for (const [key, entry] of attempts) if (entry.until < Date.now()) attempts.delete(key);
-    for (const [res, session] of clients) {
-      if (!db.prepare('SELECT 1 FROM sessions WHERE token=? AND expires_at>?').get(session.token, Date.now())) { res.end(); clients.delete(res); changed = true; }
-      else res.write(': heartbeat\n\n');
-    }
+    for (const [res] of clients) res.write(': heartbeat\n\n');
     if (changed) broadcast();
   }, 10_000);
   timer.unref();

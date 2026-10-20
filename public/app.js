@@ -29,8 +29,6 @@ async function loadMapTiles() {
 }
 loadMapTiles();
 
-let user = null;
-let mode = 'register';
 let events = null;
 let alertFit = false;
 let hasReceivedAlerts = false;
@@ -39,6 +37,7 @@ let currentAlerts = [];
 let currentClearances = [];
 let freshnessTimer;
 const alertLayers = new Map();
+const pulseLayers = new Map();
 const directionLayers = new Map();
 const toastTimers = new Map();
 const initials = name => [...name.trim()].slice(0, 2).join('').toUpperCase();
@@ -76,32 +75,37 @@ function adminIcon(alert, now) {
 }
 
 function directionIcon(direction) {
-  const from = map.project([direction.from.latitude, direction.from.longitude], 8);
-  const to = map.project([direction.to.latitude, direction.to.longitude], 8);
+  const from = map.latLngToLayerPoint([direction.from.latitude, direction.from.longitude]);
+  const to = map.latLngToLayerPoint([direction.to.latitude, direction.to.longitude]);
   const angle = Math.atan2(to.y - from.y, to.x - from.x) * 180 / Math.PI;
-  return L.divIcon({ className: 'direction-marker', iconSize: [64, 32], iconAnchor: [0, 16],
-    html: `<span class="direction-glyph" style="--direction-angle:${angle}deg"><svg viewBox="0 0 64 32" aria-hidden="true"><path class="direction-line" d="M7 16H45"/><path class="direction-head" d="m40 11 8 5-8 5"/><g class="direction-drone"><circle cx="27" cy="16" r="3"/><circle cx="18" cy="9" r="3.5"/><circle cx="36" cy="9" r="3.5"/><circle cx="18" cy="23" r="3.5"/><circle cx="36" cy="23" r="3.5"/><path d="M18 9 27 16 36 9M18 23 27 16 36 23"/></g></svg></span>` });
+  return L.divIcon({ className: 'direction-marker', iconSize: [48, 34], iconAnchor: [24, 17],
+    html: `<span class="direction-glyph" style="--direction-angle:${angle}deg"><svg viewBox="0 0 48 34" aria-hidden="true"><path class="direction-head" d="M8 17h30m-7-7 9 7-9 7"/><g class="direction-drone"><path d="M2 17 13 13 20 5 22 6 19 14 34 16 39 17 34 18 19 20 22 28 20 29 13 21Z"/></g></svg></span>` });
+}
+function pulseIcon() {
+  return L.divIcon({ className: 'alert-pulse', iconSize: [24, 24], iconAnchor: [12, 12], html: '<span class="alert-pulse-ring"></span><span class="alert-pulse-core"></span>' });
 }
 
 function renderDirections(alerts, now) {
   const directed = new Map();
   for (const alert of alerts) if (alert.direction?.from?.id === alert.placeId && alert.observedAt + 45 * 60_000 > now && !directed.has(alert.placeId)) directed.set(alert.placeId, alert);
-  for (const [id, layer] of directionLayers) if (!directed.has(id)) { layer.remove(); directionLayers.delete(id); }
+  for (const [id, entry] of directionLayers) if (!directed.has(id)) { entry.line.remove(); entry.marker.remove(); directionLayers.delete(id); }
   for (const [id, alert] of directed) {
     const direction = alert.direction;
-    let layer = directionLayers.get(id);
-    if (!layer) {
-      layer = L.marker([direction.from.latitude, direction.from.longitude], { pane: 'alert-direction', icon: directionIcon(direction), keyboard: true }).addTo(map);
-      directionLayers.set(id, layer);
-    } else layer.setLatLng([direction.from.latitude, direction.from.longitude]).setIcon(directionIcon(direction));
+    const coordinates = [[direction.from.latitude, direction.from.longitude], [direction.to.latitude, direction.to.longitude]];
+    let entry = directionLayers.get(id);
+    if (!entry) {
+      const line = L.polyline(coordinates, { pane: 'alert-direction', className: 'direction-route', color: '#075e79', weight: 2.5, opacity: .8, dashArray: '5 5' }).addTo(map);
+      const marker = L.marker([(direction.from.latitude + direction.to.latitude) / 2, (direction.from.longitude + direction.to.longitude) / 2], { pane: 'alert-direction', icon: directionIcon(direction), keyboard: true }).addTo(map);
+      entry = { line, marker }; directionLayers.set(id, entry);
+    } else { entry.line.setLatLngs(coordinates); entry.marker.setLatLng([(direction.from.latitude + direction.to.latitude) / 2, (direction.from.longitude + direction.to.longitude) / 2]).setIcon(directionIcon(direction)); }
     const tip = document.createElement('span');
     tip.textContent = `${direction.from.name} → ${direction.to.name}. Направление из сообщения, не положение БПЛА.`;
-    layer.bindTooltip(tip, { direction: 'top', offset: [0, -12] });
+    entry.marker.bindTooltip(tip, { direction: 'top', offset: [0, -12] });
     const popup = document.createElement('div');
     const title = document.createElement('strong'); title.textContent = `${direction.from.name} → ${direction.to.name}`;
     const note = document.createElement('p'); note.textContent = 'Направление указано в сообщении. Значок не показывает текущее положение БПЛА.';
     const source = document.createElement('a'); source.href = `https://t.me/${alert.source}/${alert.messageId}`; source.target = '_blank'; source.rel = 'noopener noreferrer'; source.textContent = 'Открыть сообщение';
-    popup.append(title, note, source); layer.bindPopup(popup);
+    popup.append(title, note, source); entry.marker.bindPopup(popup);
   }
 }
 
@@ -119,6 +123,7 @@ function renderAlerts(alerts, clearances = []) {
   activeAlertIds = new Set(active.keys());
   hasReceivedAlerts = true;
   for (const [id, entry] of alertLayers) if (!latest.has(id)) { entry.layer.remove(); alertLayers.delete(id); }
+  for (const [id, layer] of pulseLayers) if (!active.has(id) || active.get(id).areaType !== 'settlement') { layer.remove(); pulseLayers.delete(id); }
   let nextColorChange = Infinity;
   for (const [id, alert] of latest) {
     const expiry = alert.cleared ? alert.expiresAt : alert.observedAt + 60 * 60_000;
@@ -141,6 +146,9 @@ function renderAlerts(alerts, clearances = []) {
     else entry.layer.setStyle(alertStyle(alert, now));
     if (kind === 'marker') {
       entry.layer.setLatLng([alert.latitude, alert.longitude]);
+      let pulse = pulseLayers.get(id);
+      if (!pulse) { pulse = L.marker([alert.latitude, alert.longitude], { pane: 'alert-direction', icon: pulseIcon(), interactive: false }).addTo(map); pulseLayers.set(id, pulse); }
+      else pulse.setLatLng([alert.latitude, alert.longitude]);
       const tooltip = document.createElement('span');
       tooltip.textContent = `${alert.place} · ${alert.cleared ? 'Отбой опубликован' : 'Опубликовано'}: ${publicationTime.format(new Date(alert.publishedAt ?? alert.observedAt))} МСК`;
       entry.layer.bindTooltip(tooltip, { direction: 'top', offset: [0, -8] });
@@ -171,6 +179,7 @@ function renderAlerts(alerts, clearances = []) {
     alertFit = true;
   }
 }
+map.on('zoomend moveend', () => renderDirections(currentAlerts, Date.now()));
 
 async function api(path, data) {
   let response;
@@ -186,42 +195,6 @@ async function api(path, data) {
   return response.status === 204 ? null : response.json();
 }
 
-function changeMode(next) {
-  mode = next;
-  const registering = mode === 'register';
-  $('register-tab').classList.toggle('active', registering);
-  $('login-tab').classList.toggle('active', !registering);
-  $('name-label').hidden = !registering;
-  $('name').required = registering;
-  $('password').autocomplete = registering ? 'new-password' : 'current-password';
-  $('auth-submit').textContent = registering ? 'Создать аккаунт ↗' : 'Войти ↗';
-  $('auth-error').textContent = '';
-}
-$('register-tab').onclick = () => changeMode('register');
-$('login-tab').onclick = () => changeMode('login');
-$('auth-dialog').addEventListener('cancel', event => event.preventDefault());
-$('auth-form').addEventListener('submit', async event => {
-  event.preventDefault();
-  $('auth-error').textContent = '';
-  $('auth-submit').disabled = true;
-  try {
-    const result = await api(`/${mode}`, { name: $('name').value, email: $('email').value, password: $('password').value });
-    $('password').value = '';
-    $('auth-dialog').close();
-    signedIn(result.user);
-  } catch (error) { $('auth-error').textContent = error.message; }
-  finally { $('auth-submit').disabled = false; }
-});
-
-function signedIn(value) {
-  user = value;
-  $('profile-name').textContent = user.name;
-  $('profile-avatar').textContent = initials(user.name);
-  $('profile-status').textContent = 'Вы на платформе';
-  $('logout').hidden = false;
-  notice('');
-  connect();
-}
 function connect() {
   events?.close();
   $('connection').textContent = 'Подключение…';
@@ -233,36 +206,8 @@ function connect() {
     renderAlerts(data.alerts || [], data.clearances || []);
     $('feed-status').textContent = ({ off: 'Каналы не подключены', connecting: 'Соединяемся с каналами…', connected: 'Каналы подключены', error: 'Ошибка подключения канала' })[data.feedStatus] || 'Каналы не подключены';
   };
-  events.onerror = async () => {
-    $('connection').textContent = 'Переподключение…';
-    try { await api('/me'); }
-    catch (error) {
-      if (error.status === 401) { signedOut(); notice('Сессия завершилась. Войдите снова.'); }
-    }
-  };
-}
-function signedOut() {
-  events?.close(); events = null; user = null;
-  $('online-count').textContent = '0';
-  renderAlerts([]);
-  hasReceivedAlerts = false;
-  activeAlertIds = new Set();
-  for (const toast of toastTimers.keys()) dismissToast(toast);
-  $('feed-status').textContent = 'Войдите в аккаунт';
-  $('profile-name').textContent = 'Гость';
-  $('profile-avatar').textContent = '?';
-  $('profile-status').textContent = 'Войдите, чтобы присоединиться';
-  $('logout').hidden = true;
-  $('connection').textContent = 'Войдите в аккаунт';
-  if (!$('auth-dialog').open) $('auth-dialog').showModal();
-}
-$('logout').onclick = async () => {
-  $('logout').disabled = true;
-  try { await api('/logout', {}); signedOut(); }
-  catch (error) { notice(error.message); }
-  finally { $('logout').disabled = false; }
+  events.onerror = () => { $('connection').textContent = 'Переподключение…'; };
 };
 window.addEventListener('pagehide', () => { events?.close(); events = null; });
-window.addEventListener('pageshow', event => { if (event.persisted && user) connect(); });
-try { const data = await api('/me'); signedIn(data.user); }
-catch (error) { signedOut(); if (error.status !== 401) $('auth-error').textContent = error.message; }
+window.addEventListener('pageshow', event => { if (event.persisted) connect(); });
+connect();
