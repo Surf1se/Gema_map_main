@@ -12,11 +12,12 @@
     <div class="workspace-label">ОБЩЕЕ ПРОСТРАНСТВО</div>
     <div class="nav-selected"><span>◈</span> Общая карта <span class="live-dot"></span></div>
     <div class="sidebar-intro"><span class="eyebrow">GEMA MAP</span><h1>Предупреждения<br>на карте.</h1><p>События из Telegram отображаются на карте России. Данные обновляются в реальном времени.</p></div>
-    <div class="online-card" aria-label="Показатели платформы">
-      <div class="stat-card"><span class="stat-icon" aria-hidden="true">●</span><div><span class="eyebrow">ОНЛАЙН</span><div id="online-count" class="stat-value" aria-live="polite">0</div></div></div>
-      <div class="stat-card alert-card"><span class="stat-icon" aria-hidden="true">!</span><div><span class="eyebrow">ОПАСНОСТИ</span><div id="active-circles-count" class="stat-value" aria-live="polite">0</div></div></div>
+    <div class="metrics-bar" aria-label="Показатели платформы">
+      <div class="metric"><span class="metric-icon metric-icon--online" aria-hidden="true">●</span><span id="online-count" class="metric-value" aria-live="polite">0</span><span>онлайн</span></div>
+      <span class="metric-divider" aria-hidden="true"></span>
+      <div class="metric"><span class="metric-icon metric-icon--alerts" aria-hidden="true">!</span><span id="active-circles-count" class="metric-value" aria-live="polite">0</span><span>опасностей</span></div>
     </div>
-    <section class="legend" aria-labelledby="legend-title"><span class="eyebrow" id="legend-title">ОБОЗНАЧЕНИЯ</span><div><i class="legend-swatch legend-swatch--red"></i>Активная область</div><div><i class="legend-swatch legend-swatch--gray"></i>Нет обновлений 30 минут</div><div><i class="legend-swatch legend-swatch--dot"></i>Населённый пункт</div><div><i class="legend-swatch legend-swatch--drone">➤</i>Подтверждённое направление</div><small>Отметки исчезают через 60 минут без нового сообщения. Зелёная отметка отбоя хранится 5 минут.</small></section>
+    <section class="legend" aria-labelledby="legend-title"><h2 id="legend-title">Обозначения на карте</h2><div class="legend-columns"><div class="legend-column"><h3>Статусы территорий</h3><div><i class="legend-swatch legend-swatch--red"></i>Активная опасность</div><div><i class="legend-swatch legend-swatch--gray"></i>Нет обновлений 30 минут</div></div><div class="legend-column"><h3>Объекты на карте</h3><div><i class="legend-swatch legend-swatch--dot"></i>Населённый пункт</div><div><i class="legend-swatch legend-swatch--drone">➤</i>Подтверждённое направление</div></div></div><small>Предупреждения скрываются через 60 минут без обновлений.<br>Зелёная отметка отбоя отображается 5 минут.</small></section>
   </aside>
   <main class="map-shell">
     <div id="map" aria-label="Карта"></div>
