@@ -86,6 +86,12 @@ test('additional explicit danger phrases require a recognized place', () => {
   assert.equal(parsePost('МО Раменское\nНет угрозы', places).kind, 'ignore');
 });
 
+test('new radar trigger phrases are treated as danger signals', () => {
+  for (const phrase of ['Тревога по БПЛА', 'Внимание по БПЛА', 'Опасность по фпв', 'опасность фпв', 'Тревога по БПЛА сохраняется', 'Рой БПЛА', 'массовые сбития БПЛА', 'Сбитие БПЛА']) {
+    assert.equal(parsePost(`Раменское\n${phrase}`, places).kind, 'danger', phrase);
+  }
+});
+
 test('places named inside detection messages are resolved in Russian cases', () => {
   assert.equal(parsePost('Зафиксировали в Москве', places).place?.name, 'Москва');
   assert.equal(parsePost('Зафиксировали БПЛА в Раменском', places).place?.name, 'Раменское');

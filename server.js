@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPlaceIndex, parsePost, regionNameForCode } from './lib/alerts.js';
 import { lookupBoundary } from './lib/boundaries.js';
+import { channelNames } from './lib/telegram-watcher.js';
 
 const scrypt = promisify(scryptCallback);
 const root = dirname(fileURLToPath(import.meta.url));
@@ -190,7 +191,7 @@ export function createApp({ database = join(root, '.data', 'gema.sqlite'), secur
     const messageId = String(id);
     const observedAt = Number(date);
     const publicationTime = Number(publishedAt);
-    if (!['radar_moscoww', 'radarrussiia'].includes(source) || !/^\d+$/.test(messageId) || !Number.isFinite(observedAt) || !Number.isFinite(publicationTime) || publicationTime > observedAt || observedAt > Date.now() + 60_000) return;
+    if (!channelNames.includes(source) || !/^\d+$/.test(messageId) || !Number.isFinite(observedAt) || !Number.isFinite(publicationTime) || publicationTime > observedAt || observedAt > Date.now() + 60_000) return;
     db.prepare('DELETE FROM alerts WHERE expires_at<=?').run(Date.now());
     const parsed = parsePost(text, places);
     if (parsed.kind !== 'clear') db.prepare('DELETE FROM alerts WHERE message_id GLOB ?').run(`${source}:${messageId}:*`);
